@@ -15,6 +15,7 @@ import {
   Cpu,
   FileText,
   Gauge,
+  Github,
   IndianRupee,
   Layers3,
   LineChart,
@@ -24,9 +25,10 @@ import {
   ShieldCheck,
   Sparkles,
   Terminal,
-  UserCheck,
   LogOut,
   Users,
+  Eye,
+  EyeOff,
   KeyRound,
   WalletCards,
   Zap,
@@ -178,6 +180,7 @@ function LoginGate({ onLogin }: { onLogin: (session: Session) => void }) {
   const [error, setError] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     if (!googleClientId) {
@@ -316,31 +319,53 @@ function LoginGate({ onLogin }: { onLogin: (session: Session) => void }) {
       .finally(() => setLoading(false));
   }
 
+  function showProviderSetup(provider: string) {
+    setError(`${provider} login is ready in the UI. Add OAuth credentials in the backend to activate this provider.`);
+  }
+
   return (
     <main className="login-shell">
-      <section className="login-hero">
-        <div>
-          <span className="eyebrow">CloudMeter AI</span>
-          <h1>Enter with Google, connect a cluster, see cost clarity in minutes.</h1>
-          <p>
-            New users get a limited workspace for one cluster and seven days of metering. Company admins can unlock invoices, chargeback edits, and MSP customer billing.
-          </p>
+      <section className="login-card">
+        <div className="login-brand">
+          <span><Cloud size={34} /></span>
+          <strong>CloudMeter AI</strong>
         </div>
-        <aside className="login-box">
-          <UserCheck size={26} />
+        <aside className="login-box" onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            passwordSignIn();
+          }
+        }}>
           <h2>Sign in</h2>
-          <label>Email</label>
-          <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="you@company.com" type="email" />
+          <p>Welcome back to your CloudMeter AI workspace.</p>
+          <div className="provider-grid">
+            <button className="provider-button" type="button" onClick={() => showProviderSetup("GitHub")} disabled={loading}>
+              <Github size={24} /> Github
+            </button>
+            <button className="provider-button" type="button" onClick={signIn} disabled={loading || !ready || !googleClientId}>
+              <span className="google-mark">G</span> Google
+            </button>
+            <button className="provider-button provider-wide" type="button" onClick={() => showProviderSetup("SSO")} disabled={loading}>
+              <KeyRound size={24} /> SSO
+            </button>
+          </div>
+          <div className="login-divider"><span>OR</span></div>
+          <label>Email address</label>
+          <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Enter your email" type="email" autoComplete="email" />
           <label>Password</label>
-          <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Minimum 8 characters" type="password" />
-          <button className="password-button" onClick={passwordSignIn} disabled={loading}>
-            <KeyRound size={17} /> {loading ? "Signing in..." : "Login with password"}
-          </button>
-          <button className="google-button" onClick={signIn} disabled={loading || !ready || !googleClientId}>
-            <span>G</span> {loading ? "Waiting for Google..." : "Connect / Continue with Google"}
+          <div className="password-field">
+            <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" type={showPassword ? "text" : "password"} autoComplete="current-password" />
+            <button type="button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((visible) => !visible)}>
+              {showPassword ? <EyeOff size={21} /> : <Eye size={21} />}
+            </button>
+          </div>
+          <div className="forgot-row">
+            Forgot password? <button type="button" onClick={() => setError("Password reset will be available after email delivery is configured.")}>Reset</button>
+          </div>
+          <button className="password-button" type="button" onClick={passwordSignIn} disabled={loading}>
+            {loading ? "Signing in..." : "Sign in"}
           </button>
           {error && <p className="login-error">{error}</p>}
-          <small>First time: enter email/password and connect Google once. Next time: use password login directly.</small>
+          <small>Don't have an account? <button type="button" onClick={signIn} disabled={loading || !ready || !googleClientId}>Sign up</button></small>
         </aside>
       </section>
     </main>
