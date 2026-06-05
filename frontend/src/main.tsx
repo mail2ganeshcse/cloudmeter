@@ -661,6 +661,7 @@ function App() {
   const aiRows = data.aiUsage.slice(0, 6);
   const isSuperadmin = session?.session.role === "superadmin";
   const limited = session?.session.role !== "admin" && !isSuperadmin;
+  const primaryCluster = onboarding?.clusters?.[0] ?? null;
   const pageCopy: Record<string, { title: string; body: string; icon: any }> = {
     Command: {
       title: "Command center",
@@ -964,21 +965,21 @@ function App() {
                 {clusterRefreshMessage && <p className="cluster-refresh-message">{clusterRefreshMessage}</p>}
               </div>
               <div className="cluster-stack">
-                {(onboarding?.clusters ?? []).slice(0, limited ? 1 : 3).map((cluster) => (
-                  <article className="cluster-card" key={cluster.id}>
-                    <div>
-                      <strong>{cluster.clusterName}</strong>
-                      <span>Any cloud / On-prem · Kubernetes · {cluster.agentMode}</span>
-                    </div>
-                    <em className={cluster.status}>{cluster.status}</em>
-                    <code>{cluster.installCommand}</code>
+                <article className="cluster-card">
+                  <div>
+                    <strong>Generic Kubernetes connector</strong>
+                    <span>Any cloud / On-prem · Kubernetes · read-only</span>
+                  </div>
+                  <em className={primaryCluster?.status ?? "pending"}>{primaryCluster?.status ?? "ready"}</em>
+                  <p>{primaryCluster ? `Active setup: ${primaryCluster.clusterName}` : "Generate a tokenized setup command from onboarding, then run it from any kubectl terminal."}</p>
+                  {primaryCluster && (
                     <div className="cluster-actions">
-                      <button onClick={() => copyCommand(cluster.installCommand, cluster.clusterName)}><Copy size={16} /> {copied === cluster.clusterName ? "Copied" : "Copy install"}</button>
-                      <button onClick={() => refreshClusterStatus(cluster.clusterName)}><CheckCircle2 size={16} /> Refresh status</button>
-                      <button onClick={() => copyCommand(cluster.verifyCommand, `${cluster.clusterName}-verify`)}><Terminal size={16} /> {copied === `${cluster.clusterName}-verify` ? "Copied" : "Copy kubectl verify"}</button>
+                      <button onClick={() => copyCommand(primaryCluster.installCommand, primaryCluster.clusterName)}><Copy size={16} /> {copied === primaryCluster.clusterName ? "Copied" : "Copy install"}</button>
+                      <button onClick={() => refreshClusterStatus(primaryCluster.clusterName)}><CheckCircle2 size={16} /> Refresh status</button>
+                      <button onClick={() => copyCommand(primaryCluster.verifyCommand, `${primaryCluster.clusterName}-verify`)}><Terminal size={16} /> {copied === `${primaryCluster.clusterName}-verify` ? "Copied" : "Copy kubectl verify"}</button>
                     </div>
-                  </article>
-                ))}
+                  )}
+                </article>
               </div>
             </section>
             <section className="grid main-grid">

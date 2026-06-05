@@ -668,7 +668,12 @@ def users(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
 
 @app.get("/api/onboarding")
 def onboarding(db: Session = Depends(get_db)) -> dict[str, Any]:
-    clusters = db.query(ClusterConnection).order_by(ClusterConnection.id.desc()).all()
+    clusters = (
+        db.query(ClusterConnection)
+        .filter(~ClusterConnection.token.like("%_demo"))
+        .order_by(ClusterConnection.id.desc())
+        .all()
+    )
     return {
         "steps": [
             {"title": "Sign in with Google", "body": "Anyone can enter with a limited viewer workspace. Admins unlock invoices, chargeback edits, and more clusters."},
