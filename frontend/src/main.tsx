@@ -44,6 +44,7 @@ type Dashboard = {
   aiProviders: Array<{ name: string; amount: number; tokens: number; requests: number }>;
   teamChargeback: Array<{ team: string; amount: number }>;
   kubernetes: Array<Record<string, string | number>>;
+  networkUsage: Array<Record<string, string | number>>;
   aiUsage: Array<Record<string, string | number>>;
   invoices: Array<Record<string, string | number>>;
   alerts: Array<Record<string, string | number>>;
@@ -150,6 +151,7 @@ const fallback: Dashboard = {
   ],
   teamChargeback: [],
   kubernetes: [],
+  networkUsage: [],
   aiUsage: [],
   invoices: [],
   alerts: [],
@@ -169,6 +171,16 @@ function formatInr(value: number) {
 
 function compact(value: number) {
   return new Intl.NumberFormat("en-IN", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
+function formatBytesPerSec(value: number) {
+  if (value >= 1024 * 1024) {
+    return `${(value / 1024 / 1024).toFixed(1)} MiB/s`;
+  }
+  if (value >= 1024) {
+    return `${(value / 1024).toFixed(1)} KiB/s`;
+  }
+  return `${Math.round(value)} B/s`;
 }
 
 function Bar({ value, max }: { value: number; max: number }) {
@@ -994,6 +1006,25 @@ function App() {
                   ))}
                 </div>
               </article>
+            </section>
+            <section className="panel user-management">
+              <div className="panel-head"><div><span>Network Traffic</span><h2>Namespace RX/TX from Prometheus, Cilium, Istio, or inventory fallback</h2></div><Activity size={22} /></div>
+              <table>
+                <thead><tr><th>Cluster</th><th>Namespace</th><th>Workload</th><th>Ingress</th><th>Egress</th><th>Source</th><th>Observed</th></tr></thead>
+                <tbody>
+                  {(data.networkUsage ?? []).slice(0, 10).map((row) => (
+                    <tr key={`${row.cluster}-${row.namespace}-${row.workload}`}>
+                      <td>{row.cluster}</td>
+                      <td>{row.namespace}</td>
+                      <td>{row.workload}</td>
+                      <td>{formatBytesPerSec(Number(row.rxBytesPerSec))}</td>
+                      <td>{formatBytesPerSec(Number(row.txBytesPerSec))}</td>
+                      <td><span className={`source-pill ${String(row.source)}`}>{row.source}</span></td>
+                      <td>{row.observedAt ? new Date(String(row.observedAt)).toLocaleTimeString() : "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </section>
           </>
         )}

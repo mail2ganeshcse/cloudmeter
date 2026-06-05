@@ -27,6 +27,7 @@ from .models import (
     Customer,
     Invoice,
     KubernetesCost,
+    NetworkUsage,
     UserAccount,
     UserSession,
 )
@@ -106,6 +107,22 @@ class AgentSnapshotRequest(BaseModel):
     node_count: int = 0
     pod_count: int = 0
     namespaces: list[NamespaceSnapshot] = []
+
+
+class NetworkMetric(BaseModel):
+    namespace: str
+    workload: str = "namespace"
+    rx_bytes_per_sec: float = 0
+    tx_bytes_per_sec: float = 0
+    connections: int = 0
+    source: str = "inventory"
+
+
+class AgentNetworkRequest(BaseModel):
+    token: str
+    cluster_name: str
+    provider: str = "Kubernetes"
+    metrics: list[NetworkMetric] = []
 
 
 def cluster_install_command(cluster: ClusterConnection) -> str:
@@ -821,6 +838,57 @@ def agent_snapshot(payload: AgentSnapshotRequest, db: Session = Depends(get_db))
     }
 
 
+@app.post("/api/agent/network")
+def agent_network(payload: AgentNetworkRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
+    cluster = db.query(ClusterConnection).filter(ClusterConnection.token == payload.token).first()
+    if not cluster:
+        first_customer = db.query(Customer).order_by(Customer.id).first()
+        if not first_customer:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No customer available for network registration")
+        cluster = ClusterConnection(
+            customer_id=first_customer.id,
+            cluster_name=payload.cluster_name,
+            provider=payload.provider,
+            environment="Discovered",
+            token=payload.token,
+            status="connected",
+            last_seen=datetime.now(UTC).isoformat(),
+        )
+        db.add(cluster)
+        db.flush()
+
+    cluster.status = "connected"
+    cluster.last_seen = datetime.now(UTC).isoformat()
+    db.query(NetworkUsage).filter(NetworkUsage.cluster == cluster.cluster_name).delete()
+    observed_at = datetime.now(UTC)
+    rows_created = 0
+    for metric in payload.metrics:
+        if not metric.namespace:
+            continue
+        db.add(
+            NetworkUsage(
+                customer_id=cluster.customer_id,
+                cluster=cluster.cluster_name,
+                namespace=metric.namespace,
+                workload=metric.workload or "namespace",
+                rx_bytes_per_sec=metric.rx_bytes_per_sec,
+                tx_bytes_per_sec=metric.tx_bytes_per_sec,
+                connections=metric.connections,
+                source=metric.source,
+                observed_at=observed_at,
+            )
+        )
+        rows_created += 1
+    db.commit()
+    db.refresh(cluster)
+    return {
+        "status": "ok",
+        "cluster": cluster.cluster_name,
+        "networkRows": rows_created,
+        "observedAt": observed_at.isoformat(),
+    }
+
+
 @app.get("/api/agent/install.sh", response_class=PlainTextResponse)
 def agent_install_script() -> str:
     return """#!/usr/bin/env bash
@@ -862,6 +930,12 @@ rules:
   - apiGroups: ["metrics.k8s.io"]
     resources: ["pods", "nodes"]
     verbs: ["get", "list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cilium.io"]
+    resources: ["ciliumendpoints", "ciliumnetworkpolicies"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -975,6 +1049,170 @@ spec:
               value: "${API_URL}"
 EOF
 
+NETWORK_AGENT_NAME="cloudmeter-network-agent-${CLUSTER_SLUG}"
+kubectl apply -f - <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${NETWORK_AGENT_NAME}
+  namespace: cloudmeter-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cloudmeter-network-agent
+      app.kubernetes.io/instance: ${CLUSTER_SLUG}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cloudmeter-network-agent
+        app.kubernetes.io/instance: ${CLUSTER_SLUG}
+    spec:
+      serviceAccountName: cloudmeter-agent
+      containers:
+        - name: network-agent
+          image: python:3.12-alpine
+          command:
+            - python
+            - -u
+            - -c
+            - |
+              import json
+              import os
+              import ssl
+              import time
+              import urllib.parse
+              import urllib.request
+
+              api_url = os.environ.get("CLOUDMETER_API_URL", "https://cloudmeter.in").rstrip("/")
+              token = os.environ["CLOUDMETER_TOKEN"]
+              cluster = os.environ["CLOUDMETER_CLUSTER"]
+              provider = os.environ.get("CLOUDMETER_PROVIDER", "Kubernetes")
+              service_token_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+              ca_path = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+              kube_host = "https://kubernetes.default.svc"
+
+              def http_json(url, headers=None, timeout=8):
+                request = urllib.request.Request(url, headers=headers or {})
+                context = ssl.create_default_context(cafile=ca_path)
+                with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
+                  return json.loads(response.read().decode("utf-8"))
+
+              def public_json(url, timeout=8):
+                with urllib.request.urlopen(url, timeout=timeout) as response:
+                  return json.loads(response.read().decode("utf-8"))
+
+              def post_json(path, payload):
+                data = json.dumps(payload).encode("utf-8")
+                request = urllib.request.Request(
+                  f"{api_url}{path}",
+                  data=data,
+                  headers={"Content-Type": "application/json"},
+                  method="POST",
+                )
+                with urllib.request.urlopen(request, timeout=10) as response:
+                  response.read()
+
+              def pod_inventory():
+                with open(service_token_path, "r", encoding="utf-8") as handle:
+                  bearer = handle.read().strip()
+                headers = {"Authorization": f"Bearer {bearer}"}
+                body = http_json(f"{kube_host}/api/v1/pods", headers=headers)
+                counts = {}
+                pod_to_ns = {}
+                for item in body.get("items", []):
+                  namespace = item.get("metadata", {}).get("namespace", "unknown")
+                  name = item.get("metadata", {}).get("name", "")
+                  counts[namespace] = counts.get(namespace, 0) + 1
+                  if name:
+                    pod_to_ns[name] = namespace
+                return counts, pod_to_ns
+
+              def prometheus_urls():
+                configured = os.environ.get("CLOUDMETER_PROMETHEUS_URL", "").strip()
+                urls = [configured] if configured else []
+                urls.extend([
+                  "http://prometheus-server.monitoring.svc:80",
+                  "http://prometheus-operated.monitoring.svc:9090",
+                  "http://prometheus.istio-system.svc:9090",
+                  "http://prometheus.monitoring.svc:9090",
+                ])
+                seen = []
+                for url in urls:
+                  clean = url.rstrip("/")
+                  if clean and clean not in seen:
+                    seen.append(clean)
+                return seen
+
+              def query_prometheus(base_url, query):
+                url = f"{base_url}/api/v1/query?{urllib.parse.urlencode({'query': query})}"
+                body = public_json(url)
+                if body.get("status") != "success":
+                  return []
+                return body.get("data", {}).get("result", [])
+
+              def collect_network():
+                namespace_counts, pod_to_ns = pod_inventory()
+                metrics = {
+                  namespace: {
+                    "namespace": namespace,
+                    "workload": f"{count} pods",
+                    "rx_bytes_per_sec": 0,
+                    "tx_bytes_per_sec": 0,
+                    "connections": 0,
+                    "source": "inventory",
+                  }
+                  for namespace, count in namespace_counts.items()
+                }
+                for base in prometheus_urls():
+                  try:
+                    rx_rows = query_prometheus(base, 'sum by (namespace) (rate(container_network_receive_bytes_total[5m]))')
+                    tx_rows = query_prometheus(base, 'sum by (namespace) (rate(container_network_transmit_bytes_total[5m]))')
+                    if not rx_rows and not tx_rows:
+                      continue
+                    for row in rx_rows:
+                      namespace = row.get("metric", {}).get("namespace") or row.get("metric", {}).get("exported_namespace")
+                      if namespace:
+                        metrics.setdefault(namespace, {"namespace": namespace, "workload": "namespace", "rx_bytes_per_sec": 0, "tx_bytes_per_sec": 0, "connections": 0, "source": "prometheus"})
+                        metrics[namespace]["rx_bytes_per_sec"] = float(row.get("value", [0, 0])[1])
+                        metrics[namespace]["source"] = "prometheus"
+                    for row in tx_rows:
+                      namespace = row.get("metric", {}).get("namespace") or row.get("metric", {}).get("exported_namespace")
+                      if namespace:
+                        metrics.setdefault(namespace, {"namespace": namespace, "workload": "namespace", "rx_bytes_per_sec": 0, "tx_bytes_per_sec": 0, "connections": 0, "source": "prometheus"})
+                        metrics[namespace]["tx_bytes_per_sec"] = float(row.get("value", [0, 0])[1])
+                        metrics[namespace]["source"] = "prometheus"
+                    return list(metrics.values())
+                  except Exception as exc:
+                    print(f"Prometheus network scrape failed for {base}: {exc}", flush=True)
+                return list(metrics.values())
+
+              while True:
+                try:
+                  payload = {
+                    "token": token,
+                    "cluster_name": cluster,
+                    "provider": provider,
+                    "metrics": collect_network(),
+                  }
+                  post_json("/api/agent/network", payload)
+                  print(f"CloudMeter network snapshot sent for {cluster}", flush=True)
+                except Exception as exc:
+                  print(f"CloudMeter network snapshot failed: {exc}", flush=True)
+                time.sleep(300)
+          env:
+            - name: CLOUDMETER_TOKEN
+              value: "${CLOUDMETER_TOKEN}"
+            - name: CLOUDMETER_CLUSTER
+              value: "${CLOUDMETER_CLUSTER}"
+            - name: CLOUDMETER_PROVIDER
+              value: "${CLOUDMETER_PROVIDER:-Kubernetes}"
+            - name: CLOUDMETER_API_URL
+              value: "${API_URL}"
+            - name: CLOUDMETER_PROMETHEUS_URL
+              value: "${CLOUDMETER_PROMETHEUS_URL:-}"
+EOF
+
 curl -fsSL -X POST "${API_URL}/api/agent/heartbeat" \
   -H "Content-Type: application/json" \
   -d '{"token":"'"${CLOUDMETER_TOKEN}"'","cluster_name":"'"${CLOUDMETER_CLUSTER}"'","provider":"'"${CLOUDMETER_PROVIDER:-Kubernetes}"'","status":"connected"}' >/dev/null || true
@@ -1014,6 +1252,7 @@ def dashboard(db: Session = Depends(get_db)) -> dict[str, Any]:
 
     namespaces.sort(key=lambda row: (0 if is_live_snapshot_row(row) else 1, row.cluster, row.namespace))
     ai_usage = db.query(AiUsage).order_by(AiUsage.amount_inr.desc()).all()
+    network_usage = db.query(NetworkUsage).order_by((NetworkUsage.rx_bytes_per_sec + NetworkUsage.tx_bytes_per_sec).desc()).all()
     invoices = db.query(Invoice).order_by(Invoice.total_inr.desc()).all()
     alerts = db.query(BudgetAlert).order_by(BudgetAlert.current_inr.desc()).all()
 
@@ -1072,6 +1311,19 @@ def dashboard(db: Session = Depends(get_db)) -> dict[str, Any]:
                 "amount": money(a.amount_inr),
             }
             for a in ai_usage
+        ],
+        "networkUsage": [
+            {
+                "cluster": n.cluster,
+                "namespace": n.namespace,
+                "workload": n.workload,
+                "rxBytesPerSec": round(n.rx_bytes_per_sec, 2),
+                "txBytesPerSec": round(n.tx_bytes_per_sec, 2),
+                "connections": n.connections,
+                "source": n.source,
+                "observedAt": n.observed_at.isoformat(),
+            }
+            for n in network_usage
         ],
         "invoices": [
             {

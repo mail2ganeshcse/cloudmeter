@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import ClusterConnection, Customer, KubernetesCost, UserAccount, UserSession
+from app.models import ClusterConnection, Customer, KubernetesCost, NetworkUsage, UserAccount, UserSession
 from app.settings import settings
 
 
@@ -289,6 +289,9 @@ def test_agent_install_script_uses_valid_shell_json(client):
     assert 'AGENT_NAME="cloudmeter-agent-${CLUSTER_SLUG}"' in script
     assert "app.kubernetes.io/instance: ${CLUSTER_SLUG}" in script
     assert "/api/agent/snapshot" in script
+    assert 'NETWORK_AGENT_NAME="cloudmeter-network-agent-${CLUSTER_SLUG}"' in script
+    assert "/api/agent/network" in script
+    assert "CLOUDMETER_PROMETHEUS_URL" in script
 
 
 def test_agent_snapshot_replaces_cluster_demo_rows(client, db_session):
@@ -346,3 +349,40 @@ def test_agent_snapshot_replaces_cluster_demo_rows(client, db_session):
     assert dashboard.status_code == 200
     real_rows = [row for row in dashboard.json()["kubernetes"] if row["cluster"] == "real-cluster"]
     assert real_rows[0]["source"] == "live"
+
+
+def test_agent_network_ingestion_updates_dashboard(client, db_session):
+    customer = Customer(name="Network Co", segment="SaaS", region="India", billing_model="Network")
+    db_session.add(customer)
+    db_session.flush()
+    db_session.add(
+        ClusterConnection(
+            customer_id=customer.id,
+            cluster_name="network-cluster",
+            provider="Anywhere",
+            environment="Production",
+            token="cm_network_cluster",
+            status="connected",
+        )
+    )
+    db_session.commit()
+
+    response = client.post(
+        "/api/agent/network",
+        json={
+            "token": "cm_network_cluster",
+            "cluster_name": "network-cluster",
+            "provider": "Anywhere",
+            "metrics": [
+                {"namespace": "payments", "workload": "2 pods", "rx_bytes_per_sec": 2048, "tx_bytes_per_sec": 1024, "connections": 7, "source": "prometheus"}
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    row = db_session.query(NetworkUsage).filter(NetworkUsage.cluster == "network-cluster").first()
+    assert row.namespace == "payments"
+    assert row.rx_bytes_per_sec == 2048
+    dashboard = client.get("/api/dashboard")
+    network_rows = [item for item in dashboard.json()["networkUsage"] if item["cluster"] == "network-cluster"]
+    assert network_rows[0]["source"] == "prometheus"

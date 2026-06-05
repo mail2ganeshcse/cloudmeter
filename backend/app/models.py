@@ -45,6 +45,21 @@ class KubernetesCost(Base):
     month: Mapped[str] = mapped_column(String(7), index=True)
 
 
+class NetworkUsage(Base):
+    __tablename__ = "network_usage"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    customer_id: Mapped[int] = mapped_column(Integer, index=True)
+    cluster: Mapped[str] = mapped_column(String(120), index=True)
+    namespace: Mapped[str] = mapped_column(String(80))
+    workload: Mapped[str] = mapped_column(String(120))
+    rx_bytes_per_sec: Mapped[float] = mapped_column(Float)
+    tx_bytes_per_sec: Mapped[float] = mapped_column(Float)
+    connections: Mapped[int] = mapped_column(Integer, default=0)
+    source: Mapped[str] = mapped_column(String(80), default="inventory")
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class AiUsage(Base):
     __tablename__ = "ai_usage"
 
