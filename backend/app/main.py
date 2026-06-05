@@ -1012,7 +1012,7 @@ spec:
                 metrics="$(kubectl top pods -A --no-headers 2>/dev/null || true)"
                 namespaces_json=""
                 if [ -n "$metrics" ]; then
-                  namespaces_json="$(printf '%s\n' "$metrics" | awk '
+                  namespaces_json="$(printf '%s\\n' "$metrics" | awk '
                     function cpu(v) {
                       if (v ~ /n$/) return substr(v,1,length(v)-1)/1000000;
                       if (v ~ /u$/) return substr(v,1,length(v)-1)/1000;
@@ -1035,7 +1035,7 @@ spec:
                       }
                     }')"
                 else
-                  namespaces_json="$(printf '%s\n' "$pod_counts" | awk '
+                  namespaces_json="$(printf '%s\\n' "$pod_counts" | awk '
                     NF >= 2 {
                       if (!first_seen) { first_seen=1 } else { printf "," }
                       printf "{\\"namespace\\":\\"%s\\",\\"pods\\":%d,\\"cpu_millicores\\":0,\\"memory_mib\\":0}", $1, $2;
