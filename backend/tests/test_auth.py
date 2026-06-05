@@ -69,6 +69,7 @@ def test_google_login_creates_user_session_and_cookie(client, db_session, monkey
     assert response.status_code == 200
     body = response.json()
     assert body["user"]["email"] == "user@gmail.com"
+    assert body["user"]["hasPassword"] is False
     assert body["session"]["role"] == "viewer"
     assert response.cookies.get(settings.session_cookie_name)
     assert db_session.query(UserAccount).count() == 1
@@ -129,3 +130,47 @@ def test_auth_me_and_logout(client, monkeypatch):
 
     after_logout = client.get("/api/auth/me")
     assert after_logout.status_code == 401
+
+
+def test_google_login_can_bind_local_password(client, db_session, monkeypatch):
+    monkeypatch.setattr("app.main.id_token.verify_oauth2_token", lambda *args: google_claims(email="linked@gmail.com"))
+
+    response = client.post(
+        "/api/auth/google",
+        json={"credential": "header.payload.signature", "username": "linked@gmail.com", "password": "cloudmeter123"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["user"]["hasPassword"] is True
+    account = db_session.query(UserAccount).filter(UserAccount.email == "linked@gmail.com").first()
+    assert account.password_hash
+    assert account.password_hash != "cloudmeter123"
+
+
+def test_password_login_uses_saved_local_credentials(client, monkeypatch):
+    monkeypatch.setattr("app.main.id_token.verify_oauth2_token", lambda *args: google_claims(email="local@gmail.com"))
+    google = client.post(
+        "/api/auth/google",
+        json={"credential": "header.payload.signature", "username": "local@gmail.com", "password": "cloudmeter123"},
+    )
+    assert google.status_code == 200
+    client.post("/api/auth/logout")
+
+    login = client.post("/api/auth/login", json={"username": "local@gmail.com", "password": "cloudmeter123"})
+
+    assert login.status_code == 200
+    assert login.json()["user"]["email"] == "local@gmail.com"
+
+
+def test_password_login_rejects_bad_password(client, monkeypatch):
+    monkeypatch.setattr("app.main.id_token.verify_oauth2_token", lambda *args: google_claims(email="badpass@gmail.com"))
+    google = client.post(
+        "/api/auth/google",
+        json={"credential": "header.payload.signature", "username": "badpass@gmail.com", "password": "cloudmeter123"},
+    )
+    assert google.status_code == 200
+    client.post("/api/auth/logout")
+
+    login = client.post("/api/auth/login", json={"username": "badpass@gmail.com", "password": "wrong-password"})
+
+    assert login.status_code == 401

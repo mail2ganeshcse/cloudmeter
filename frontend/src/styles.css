@@ -235,12 +235,30 @@ input {
   font-size: 28px;
 }
 
+.login-box label,
 .login-box small {
   display: block;
   color: #66776f;
 }
 
-.google-button {
+.login-box label {
+  margin-top: 10px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.login-box input {
+  width: 100%;
+  height: 46px;
+  margin: 7px 0 2px;
+  padding: 0 12px;
+  border: 1px solid rgba(16, 32, 28, 0.15);
+  border-radius: 8px;
+  outline: 0;
+}
+
+.google-button,
+.password-button {
   width: 100%;
   height: 48px;
   margin-bottom: 12px;
@@ -256,7 +274,15 @@ input {
   font-weight: 800;
 }
 
-.google-button:disabled {
+.password-button {
+  margin-top: 14px;
+  color: #10201c;
+  background: #f5bd4f;
+  border: 0;
+}
+
+.google-button:disabled,
+.password-button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
 }

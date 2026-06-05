@@ -27,6 +27,7 @@ import {
   UserCheck,
   LogOut,
   Users,
+  KeyRound,
   WalletCards,
   Zap,
 } from "lucide-react";
@@ -46,7 +47,7 @@ type Dashboard = {
 };
 
 type Session = {
-  user: { name: string; email: string; avatar: string };
+  user: { name: string; email: string; avatar: string; username?: string; hasPassword?: boolean };
   session: { role: string; plan: string };
   limits: Record<string, boolean | number>;
 };
@@ -175,6 +176,8 @@ function LoginGate({ onLogin }: { onLogin: (session: Session) => void }) {
   const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
 
   useEffect(() => {
     if (!googleClientId) {
@@ -204,7 +207,7 @@ function LoginGate({ onLogin }: { onLogin: (session: Session) => void }) {
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ credential: googleResponse.credential }),
+            body: JSON.stringify({ credential: googleResponse.credential, username, password }),
           })
             .then(async (res) => {
               if (!res.ok) {
@@ -242,7 +245,7 @@ function LoginGate({ onLogin }: { onLogin: (session: Session) => void }) {
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ credential: googleResponse.credential }),
+            body: JSON.stringify({ credential: googleResponse.credential, username, password }),
           })
             .then(async (res) => {
               if (!res.ok) {
@@ -262,6 +265,10 @@ function LoginGate({ onLogin }: { onLogin: (session: Session) => void }) {
   }, [onLogin]);
 
   function signIn() {
+    if (!username || !password) {
+      setError("Enter your email and password, then connect with Google once to save local login.");
+      return;
+    }
     if (!googleClientId) {
       setError("Google OAuth is not configured. Add VITE_GOOGLE_CLIENT_ID before signing in.");
       return;
@@ -284,6 +291,31 @@ function LoginGate({ onLogin }: { onLogin: (session: Session) => void }) {
     });
   }
 
+  function passwordSignIn() {
+    if (!username || !password) {
+      setError("Enter your email and password.");
+      return;
+    }
+    setError("");
+    setLoading(true);
+    fetch(`${apiUrl}/api/auth/login`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ detail: "Login failed" }));
+          throw new Error(body.detail ?? "Login failed");
+        }
+        return res.json();
+      })
+      .then(onLogin)
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setLoading(false));
+  }
+
   return (
     <main className="login-shell">
       <section className="login-hero">
@@ -297,11 +329,18 @@ function LoginGate({ onLogin }: { onLogin: (session: Session) => void }) {
         <aside className="login-box">
           <UserCheck size={26} />
           <h2>Sign in</h2>
+          <label>Email</label>
+          <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="you@company.com" type="email" />
+          <label>Password</label>
+          <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Minimum 8 characters" type="password" />
+          <button className="password-button" onClick={passwordSignIn} disabled={loading}>
+            <KeyRound size={17} /> {loading ? "Signing in..." : "Login with password"}
+          </button>
           <button className="google-button" onClick={signIn} disabled={loading || !ready || !googleClientId}>
-            <span>G</span> {loading ? "Waiting for Google..." : "Continue with Google"}
+            <span>G</span> {loading ? "Waiting for Google..." : "Connect / Continue with Google"}
           </button>
           {error && <p className="login-error">{error}</p>}
-          <small>Limited viewer access is available to any Google account.</small>
+          <small>First time: enter email/password and connect Google once. Next time: use password login directly.</small>
         </aside>
       </section>
     </main>

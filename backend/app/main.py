@@ -1,7 +1,7 @@
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
-from hashlib import sha256
-from secrets import token_urlsafe
+from hashlib import pbkdf2_hmac, sha256
+from secrets import token_hex, token_urlsafe
 from typing import Any
 
 import certifi
@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
-from sqlalchemy import func
+from sqlalchemy import inspect, text, func
 from sqlalchemy.orm import Session
 
 from .database import Base, SessionLocal, engine, get_db
@@ -46,6 +46,7 @@ app.add_middleware(
 @app.on_event("startup")
 def startup() -> None:
     Base.metadata.create_all(bind=engine)
+    ensure_user_account_columns()
     with SessionLocal() as db:
         seed_if_empty(db)
 
@@ -56,6 +57,13 @@ def money(value: float | None) -> int:
 
 class GoogleLoginRequest(BaseModel):
     credential: str
+    username: str | None = None
+    password: str | None = None
+
+
+class PasswordLoginRequest(BaseModel):
+    username: str
+    password: str
 
 
 class ClusterCreateRequest(BaseModel):
@@ -80,6 +88,44 @@ def cluster_install_command(cluster: ClusterConnection) -> str:
 
 def token_hash(token: str) -> str:
     return sha256(token.encode("utf-8")).hexdigest()
+
+
+def ensure_user_account_columns() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("user_accounts"):
+        return
+    existing = {column["name"] for column in inspector.get_columns("user_accounts")}
+    ddl = {
+        "username": "ALTER TABLE user_accounts ADD COLUMN username VARCHAR(180) DEFAULT ''",
+        "password_salt": "ALTER TABLE user_accounts ADD COLUMN password_salt VARCHAR(80) DEFAULT ''",
+        "password_hash": "ALTER TABLE user_accounts ADD COLUMN password_hash VARCHAR(160) DEFAULT ''",
+    }
+    with engine.begin() as connection:
+        for column, statement in ddl.items():
+            if column not in existing:
+                connection.execute(text(statement))
+
+
+def hash_password(password: str, salt: str) -> str:
+    return pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 180_000).hex()
+
+
+def set_local_password(user: UserAccount, username: str, password: str) -> None:
+    cleaned_username = username.strip().lower()
+    if len(cleaned_username) < 3 or "@" not in cleaned_username:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Use a valid email as username")
+    if len(password) < 8:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password must be at least 8 characters")
+    salt = token_hex(16)
+    user.username = cleaned_username
+    user.password_salt = salt
+    user.password_hash = hash_password(password, salt)
+
+
+def password_matches(user: UserAccount, password: str) -> bool:
+    if not user.password_salt or not user.password_hash:
+        return False
+    return hash_password(password, user.password_salt) == user.password_hash
 
 
 def role_for_email(email: str) -> str:
@@ -114,6 +160,8 @@ def session_payload(user: UserAccount, session_token: str | None = None) -> dict
             "name": user.name,
             "email": user.email,
             "avatar": user.avatar,
+            "username": user.username or user.email,
+            "hasPassword": bool(user.password_hash),
         },
         "limits": limits_for_role(user.role),
     }
@@ -213,6 +261,7 @@ def google_login(payload: GoogleLoginRequest, response: Response, db: Session = 
         user = UserAccount(
             google_sub=google_sub,
             email=email,
+            username=(payload.username or email).strip().lower(),
             name=str(claims.get("name") or email.split("@")[0]),
             avatar=str(claims.get("picture") or ""),
             role=role,
@@ -224,11 +273,18 @@ def google_login(payload: GoogleLoginRequest, response: Response, db: Session = 
         db.add(user)
     else:
         user.email = email
+        if not user.username:
+            user.username = (payload.username or email).strip().lower()
         user.name = str(claims.get("name") or user.name)
         user.avatar = str(claims.get("picture") or user.avatar)
         user.role = role
         user.hosted_domain = str(claims.get("hd") or "")
         user.last_login_at = now
+
+    if payload.username and payload.password:
+        if payload.username.strip().lower() != email:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username must match the verified Google email")
+        set_local_password(user, payload.username, payload.password)
 
     session_token = token_urlsafe(32)
     expires_at = now + timedelta(days=settings.session_ttl_days)
@@ -246,6 +302,32 @@ def google_login(payload: GoogleLoginRequest, response: Response, db: Session = 
     db.refresh(user)
     set_session_cookie(response, session_token, expires_at)
 
+    return session_payload(user, session_token)
+
+
+@app.post("/api/auth/login")
+def password_login(payload: PasswordLoginRequest, response: Response, db: Session = Depends(get_db)) -> dict[str, Any]:
+    username = payload.username.strip().lower()
+    user = db.query(UserAccount).filter((UserAccount.username == username) | (UserAccount.email == username)).first()
+    if not user or not password_matches(user, payload.password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
+
+    now = datetime.now(UTC)
+    user.last_login_at = now
+    session_token = token_urlsafe(32)
+    expires_at = now + timedelta(days=settings.session_ttl_days)
+    db.add(
+        UserSession(
+            user_id=user.id,
+            token_hash=token_hash(session_token),
+            created_at=now,
+            expires_at=expires_at,
+            revoked=False,
+        )
+    )
+    db.commit()
+    db.refresh(user)
+    set_session_cookie(response, session_token, expires_at)
     return session_payload(user, session_token)
 
 
