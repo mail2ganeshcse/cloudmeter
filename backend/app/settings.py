@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     session_cookie_name: str = "cloudmeter_session"
     session_ttl_days: int = 7
     session_cookie_secure: bool = False
+    public_api_url: str = "http://localhost:8001"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

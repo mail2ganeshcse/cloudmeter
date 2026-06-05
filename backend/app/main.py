@@ -69,8 +69,13 @@ def cluster_install_command(cluster: ClusterConnection) -> str:
     return (
         "CLOUDMETER_TOKEN={token} CLOUDMETER_CLUSTER={cluster} "
         "CLOUDMETER_PROVIDER='{provider}' "
-        "/bin/bash -c \"$(curl -fsSL http://localhost:8001/api/agent/install.sh)\""
-    ).format(token=cluster.token, cluster=cluster.cluster_name, provider=cluster.provider)
+        "/bin/bash -c \"$(curl -fsSL {public_api_url}/api/agent/install.sh)\""
+    ).format(
+        token=cluster.token,
+        cluster=cluster.cluster_name,
+        provider=cluster.provider,
+        public_api_url=settings.public_api_url.rstrip("/"),
+    )
 
 
 def token_hash(token: str) -> str:
