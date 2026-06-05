@@ -105,6 +105,18 @@ def cluster_install_command(cluster: ClusterConnection) -> str:
     )
 
 
+def cluster_slug(name: str) -> str:
+    cleaned = "".join(character.lower() if character.isalnum() else "-" for character in name)
+    while "--" in cleaned:
+        cleaned = cleaned.replace("--", "-")
+    cleaned = cleaned.strip("-")[:48]
+    return cleaned or "default"
+
+
+def cluster_verify_command(cluster: ClusterConnection) -> str:
+    return f"kubectl get pods -n cloudmeter-agent -l app.kubernetes.io/instance={cluster_slug(cluster.cluster_name)}"
+
+
 def token_hash(token: str) -> str:
     return sha256(token.encode("utf-8")).hexdigest()
 
@@ -644,7 +656,7 @@ def onboarding(db: Session = Depends(get_db)) -> dict[str, Any]:
                 "agentMode": c.agent_mode,
                 "lastSeen": c.last_seen,
                 "installCommand": cluster_install_command(c),
-                "verifyCommand": f"kubectl logs -n cloudmeter-agent -l app.kubernetes.io/name=cloudmeter-agent --tail=20",
+                "verifyCommand": cluster_verify_command(c),
             }
             for c in clusters
         ],
@@ -670,7 +682,7 @@ def create_cluster(payload: ClusterCreateRequest, db: Session = Depends(get_db))
         "provider": cluster.provider,
         "status": cluster.status,
         "installCommand": cluster_install_command(cluster),
-        "verifyCommand": "kubectl get pods -n cloudmeter-agent",
+        "verifyCommand": cluster_verify_command(cluster),
     }
 
 
@@ -727,6 +739,12 @@ if [ -z "${CLOUDMETER_TOKEN:-}" ] || [ -z "${CLOUDMETER_CLUSTER:-}" ]; then
   exit 1
 fi
 
+CLUSTER_SLUG="$(printf '%s' "${CLOUDMETER_CLUSTER}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/^-*//;s/-*$//;s/--*/-/g' | cut -c1-48)"
+if [ -z "${CLUSTER_SLUG}" ]; then
+  CLUSTER_SLUG="default"
+fi
+AGENT_NAME="cloudmeter-agent-${CLUSTER_SLUG}"
+
 curl -fsSL -X POST "${API_URL}/api/agent/heartbeat" \
   -H "Content-Type: application/json" \
   -d '{"token":"'"${CLOUDMETER_TOKEN}"'","cluster_name":"'"${CLOUDMETER_CLUSTER}"'","provider":"'"${CLOUDMETER_PROVIDER:-Kubernetes}"'","status":"installing"}' >/dev/null || true
@@ -759,17 +777,19 @@ roleRef:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: cloudmeter-agent
+  name: ${AGENT_NAME}
   namespace: cloudmeter-agent
 spec:
   replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: cloudmeter-agent
+      app.kubernetes.io/instance: ${CLUSTER_SLUG}
   template:
     metadata:
       labels:
         app.kubernetes.io/name: cloudmeter-agent
+        app.kubernetes.io/instance: ${CLUSTER_SLUG}
     spec:
       serviceAccountName: cloudmeter-agent
       containers:
@@ -800,7 +820,7 @@ curl -fsSL -X POST "${API_URL}/api/agent/heartbeat" \
   -d '{"token":"'"${CLOUDMETER_TOKEN}"'","cluster_name":"'"${CLOUDMETER_CLUSTER}"'","provider":"'"${CLOUDMETER_PROVIDER:-Kubernetes}"'","status":"connected"}' >/dev/null || true
 
 echo "CloudMeter read-only agent installed for ${CLOUDMETER_CLUSTER}."
-echo "Verify with: kubectl get pods -n cloudmeter-agent"
+echo "Verify with: kubectl get pods -n cloudmeter-agent -l app.kubernetes.io/instance=${CLUSTER_SLUG}"
 """
 
 

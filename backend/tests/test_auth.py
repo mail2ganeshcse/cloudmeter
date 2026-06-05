@@ -286,3 +286,5 @@ def test_agent_install_script_uses_valid_shell_json(client):
     script = response.text
     assert '-d \'{"token":"\'"${CLOUDMETER_TOKEN}"\'"' in script
     assert '"cluster_name":"\'"${CLOUDMETER_CLUSTER}"\'"' in script
+    assert 'AGENT_NAME="cloudmeter-agent-${CLUSTER_SLUG}"' in script
+    assert "app.kubernetes.io/instance: ${CLUSTER_SLUG}" in script

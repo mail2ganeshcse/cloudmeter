@@ -1281,6 +1281,15 @@ h1 {
   cursor: pointer;
 }
 
+.cluster-refresh-message {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: #10201c;
+  background: #9cedc8;
+  line-height: 1.4;
+}
+
 .stat,
 .panel {
   border: 1px solid rgba(16, 32, 28, 0.09);

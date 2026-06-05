@@ -621,6 +621,7 @@ function App() {
   const [usersError, setUsersError] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [passwordMessage, setPasswordMessage] = useState("");
+  const [clusterRefreshMessage, setClusterRefreshMessage] = useState("");
 
   useEffect(() => {
     fetch(`${apiUrl}/api/auth/me`, { credentials: "include" })
@@ -711,6 +712,22 @@ function App() {
       setCopied(label);
       window.setTimeout(() => setCopied(""), 1800);
     });
+  }
+
+  function refreshClusterStatus(clusterName?: string) {
+    fetch(`${apiUrl}/api/onboarding`)
+      .then((res) => res.json())
+      .then((freshOnboarding) => {
+        setOnboarding(freshOnboarding);
+        const cluster = freshOnboarding.clusters?.find((item: Onboarding["clusters"][number]) => item.clusterName === clusterName);
+        if (cluster) {
+          setClusterRefreshMessage(`${cluster.clusterName} is ${cluster.status}. Last seen ${cluster.lastSeen}.`);
+        } else {
+          setClusterRefreshMessage("Cluster status refreshed.");
+        }
+        window.setTimeout(() => setClusterRefreshMessage(""), 3500);
+      })
+      .catch(() => setClusterRefreshMessage("Could not refresh cluster status."));
   }
 
   function logout() {
@@ -932,6 +949,7 @@ function App() {
                     <label key={item}><CheckCircle2 size={16} /> {item}</label>
                   ))}
                 </div>
+                {clusterRefreshMessage && <p className="cluster-refresh-message">{clusterRefreshMessage}</p>}
               </div>
               <div className="cluster-stack">
                 {(onboarding?.clusters ?? []).slice(0, limited ? 1 : 3).map((cluster) => (
@@ -944,7 +962,8 @@ function App() {
                     <code>{cluster.installCommand}</code>
                     <div className="cluster-actions">
                       <button onClick={() => copyCommand(cluster.installCommand, cluster.clusterName)}><Copy size={16} /> {copied === cluster.clusterName ? "Copied" : "Copy install"}</button>
-                      <button onClick={() => copyCommand(cluster.verifyCommand, `${cluster.clusterName}-verify`)}><Terminal size={16} /> Verify</button>
+                      <button onClick={() => refreshClusterStatus(cluster.clusterName)}><CheckCircle2 size={16} /> Refresh status</button>
+                      <button onClick={() => copyCommand(cluster.verifyCommand, `${cluster.clusterName}-verify`)}><Terminal size={16} /> {copied === `${cluster.clusterName}-verify` ? "Copied" : "Copy kubectl verify"}</button>
                     </div>
                   </article>
                 ))}
