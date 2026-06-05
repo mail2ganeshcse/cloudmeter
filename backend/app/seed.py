@@ -10,9 +10,9 @@ def seed_if_empty(db: Session) -> None:
         existing = {cluster.cluster_name for cluster in db.query(ClusterConnection).all()}
         customers = {customer.name: customer.id for customer in db.query(Customer).all()}
         demo_clusters = [
-            ("AstraPay Fintech", "prod-mumbai", "AWS EKS", "Production", "cm_prod_mumbai_demo", "connected", "2 minutes ago"),
-            ("NilaCloud MSP", "client-fleet-01", "OCI OKE", "MSP tenant fleet", "cm_client_fleet_demo", "pending", "Install command not run"),
-            ("MedLM Labs", "llm-prod", "GKE", "AI workloads", "cm_llm_prod_demo", "connected", "9 minutes ago"),
+            ("AstraPay Fintech", "prod-mumbai", "Any cloud / On-prem", "Kubernetes", "cm_prod_mumbai_demo", "connected", "2 minutes ago"),
+            ("NilaCloud MSP", "client-fleet-01", "Any cloud / On-prem", "Kubernetes", "cm_client_fleet_demo", "pending", "Install command not run"),
+            ("MedLM Labs", "llm-prod", "Any cloud / On-prem", "Kubernetes", "cm_llm_prod_demo", "connected", "9 minutes ago"),
         ]
         for customer_name, cluster_name, provider, environment, token, status, last_seen in demo_clusters:
             if cluster_name not in existing and customer_name in customers:
@@ -90,9 +90,9 @@ def seed_if_empty(db: Session) -> None:
 
     db.add_all(
         [
-            ClusterConnection(customer_id=c1, cluster_name="prod-mumbai", provider="AWS EKS", environment="Production", token="cm_prod_mumbai_demo", status="connected", last_seen="2 minutes ago"),
-            ClusterConnection(customer_id=c2, cluster_name="client-fleet-01", provider="OCI OKE", environment="MSP tenant fleet", token="cm_client_fleet_demo", status="pending", last_seen="Install command not run"),
-            ClusterConnection(customer_id=c3, cluster_name="llm-prod", provider="GKE", environment="AI workloads", token="cm_llm_prod_demo", status="connected", last_seen="9 minutes ago"),
+            ClusterConnection(customer_id=c1, cluster_name="prod-mumbai", provider="Any cloud / On-prem", environment="Kubernetes", token="cm_prod_mumbai_demo", status="connected", last_seen="2 minutes ago"),
+            ClusterConnection(customer_id=c2, cluster_name="client-fleet-01", provider="Any cloud / On-prem", environment="Kubernetes", token="cm_client_fleet_demo", status="pending", last_seen="Install command not run"),
+            ClusterConnection(customer_id=c3, cluster_name="llm-prod", provider="Any cloud / On-prem", environment="Kubernetes", token="cm_llm_prod_demo", status="connected", last_seen="9 minutes ago"),
         ]
     )
     db.commit()

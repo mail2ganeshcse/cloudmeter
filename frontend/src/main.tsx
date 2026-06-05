@@ -372,7 +372,7 @@ function SetupWizard({ session, onboarding, onUpdate }: { session: Session; onbo
   const [lastName, setLastName] = useState(session.user.lastName || session.user.name.split(" ").slice(1).join(" ") || "");
   const [countryCode, setCountryCode] = useState(session.user.countryCode || "+91");
   const [phoneNumber, setPhoneNumber] = useState(session.user.phoneNumber || "");
-  const [clusterProvider, setClusterProvider] = useState("GKE");
+  const [clusterProvider, setClusterProvider] = useState("Any cloud / On-prem");
   const [clusterName, setClusterName] = useState("production-ai-cluster");
   const [generatedCluster, setGeneratedCluster] = useState<Onboarding["clusters"][number] | null>(null);
   const [cloudProvider, setCloudProvider] = useState("AWS");
@@ -383,7 +383,7 @@ function SetupWizard({ session, onboarding, onUpdate }: { session: Session; onbo
 
   const existingCluster = generatedCluster ?? onboarding?.clusters?.[0] ?? null;
   const steps = ["Profile", "Kubernetes", "Cloud", "Database"];
-  const clusterProviders = ["EKS", "GKE", "AKS", "OpenShift", "OKE", "Anywhere"];
+  const clusterProviders = ["Any cloud / On-prem"];
   const cloudProviders = [
     { name: "AWS", detail: "CUR, Cost Explorer, EKS, S3, EC2 and GPU billing." },
     { name: "GCP", detail: "BigQuery export, GKE, GPUs, storage and project labels." },
@@ -431,7 +431,7 @@ function SetupWizard({ session, onboarding, onUpdate }: { session: Session; onbo
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ customer_id: 1, cluster_name: clusterName, provider: clusterProvider, environment: "Production" }),
+      body: JSON.stringify({ customer_id: 1, cluster_name: clusterName, provider: clusterProvider, environment: "Kubernetes" }),
     })
       .then(async (res) => {
         if (!res.ok) {
@@ -441,7 +441,7 @@ function SetupWizard({ session, onboarding, onUpdate }: { session: Session; onbo
         return res.json();
       })
       .then((cluster) => {
-        setGeneratedCluster({ ...cluster, id: cluster.id, environment: "Production", agentMode: "read-only", lastSeen: "Waiting for agent" });
+        setGeneratedCluster({ ...cluster, id: cluster.id, provider: "Any cloud / On-prem", environment: "Kubernetes", agentMode: "read-only", lastSeen: "Waiting for agent" });
         setMessage("Install script generated. Run it from a terminal with kubectl access.");
       })
       .catch((err: Error) => setMessage(err.message))
@@ -531,14 +531,14 @@ function SetupWizard({ session, onboarding, onUpdate }: { session: Session; onbo
           {step === 1 && (
             <section className="connect-view">
               <div className="connect-head">
-                <div><span className="step-dot">1</span><h2>Connect your Kubernetes cluster</h2><p>Select provider, generate script, then run it from your terminal.</p></div>
+                <div><span className="step-dot">1</span><h2>Connect your Kubernetes cluster</h2><p>Use one generic agent for any cloud, on-prem, managed, or self-hosted Kubernetes.</p></div>
                 <button className="ghost-button"><Terminal size={16} /> Terraform</button>
               </div>
               <div className="provider-options">
                 {clusterProviders.map((provider) => (
                   <button key={provider} className={clusterProvider === provider ? "selected" : ""} onClick={() => setClusterProvider(provider)}>
                     <span /> <Boxes size={20} /> {provider}
-                    {provider === "Anywhere" && <small>Cloud or On-Prem</small>}
+                    <small>Works with EKS, GKE, AKS, OKE, OpenShift, bare metal and private clusters</small>
                   </button>
                 ))}
               </div>
@@ -954,7 +954,7 @@ function App() {
                 <span className="eyebrow">Company onboarding</span>
                 <h2>Connect Kubernetes with one read-only command.</h2>
                 <p>
-                  Invite a customer, choose AWS EKS, GKE, OCI OKE, on-prem or generic Kubernetes, then run the generated command from terminal or cloud shell.
+                  Invite a customer, generate one cloud-neutral command, then run it from any terminal or cloud shell with kubectl access.
                 </p>
                 <div className="prereqs">
                   {(onboarding?.prerequisites ?? ["kubectl access", "curl installed", "outbound HTTPS"]).map((item) => (
@@ -968,7 +968,7 @@ function App() {
                   <article className="cluster-card" key={cluster.id}>
                     <div>
                       <strong>{cluster.clusterName}</strong>
-                      <span>{cluster.provider} · {cluster.environment} · {cluster.agentMode}</span>
+                      <span>Any cloud / On-prem · Kubernetes · {cluster.agentMode}</span>
                     </div>
                     <em className={cluster.status}>{cluster.status}</em>
                     <code>{cluster.installCommand}</code>
