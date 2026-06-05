@@ -1009,7 +1009,10 @@ def dashboard(db: Session = Depends(get_db)) -> dict[str, Any]:
         cluster = clusters_by_name.get(cluster_name)
         return bool(cluster and cluster.status == "connected" and "T" in cluster.last_seen)
 
-    namespaces.sort(key=lambda row: (0 if is_live_cluster(row.cluster) else 1, row.cluster, row.namespace))
+    def is_live_snapshot_row(row: KubernetesCost) -> bool:
+        return is_live_cluster(row.cluster) and row.workload.endswith(" live pods")
+
+    namespaces.sort(key=lambda row: (0 if is_live_snapshot_row(row) else 1, row.cluster, row.namespace))
     ai_usage = db.query(AiUsage).order_by(AiUsage.amount_inr.desc()).all()
     invoices = db.query(Invoice).order_by(Invoice.total_inr.desc()).all()
     alerts = db.query(BudgetAlert).order_by(BudgetAlert.current_inr.desc()).all()
@@ -1052,7 +1055,7 @@ def dashboard(db: Session = Depends(get_db)) -> dict[str, Any]:
                 "memory": n.memory_gb_hours,
                 "gpu": n.gpu_hours,
                 "amount": money(n.amount_inr),
-                "source": "live" if is_live_cluster(n.cluster) else "demo",
+                "source": "live" if is_live_snapshot_row(n) else "demo",
             }
             for n in namespaces
         ],
