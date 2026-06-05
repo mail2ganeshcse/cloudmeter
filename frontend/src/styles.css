@@ -315,9 +315,21 @@ input {
   font-weight: 800;
 }
 
+.provider-button small {
+  color: #8a96a8;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .provider-button:hover {
   border-color: #b8c1d1;
   background: #fbfcfe;
+}
+
+.provider-disabled {
+  color: #6e7989;
+  background: #f7f9fb;
 }
 
 .provider-button:disabled {

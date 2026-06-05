@@ -281,10 +281,6 @@ function LoginGate({ onLogin }: { onLogin: (session: Session) => void }) {
   }, [onLogin]);
 
   function signIn() {
-    if (!username || !password) {
-      setError("Enter your email and password, then connect with Google once to save local login.");
-      return;
-    }
     if (!googleClientId) {
       setError("Google OAuth is not configured. Add VITE_GOOGLE_CLIENT_ID before signing in.");
       return;
@@ -333,7 +329,7 @@ function LoginGate({ onLogin }: { onLogin: (session: Session) => void }) {
   }
 
   function showProviderSetup(provider: string) {
-    setError(`${provider} login is ready in the UI. Add OAuth credentials in the backend to activate this provider.`);
+    setError(`${provider} login is not enabled yet. Google login and saved email/password login are available now.`);
   }
 
   return (
@@ -351,14 +347,14 @@ function LoginGate({ onLogin }: { onLogin: (session: Session) => void }) {
           <h2>Sign in</h2>
           <p>Welcome back to your CloudMeter AI workspace.</p>
           <div className="provider-grid">
-            <button className="provider-button" type="button" onClick={() => showProviderSetup("GitHub")} disabled={loading}>
-              <Github size={24} /> Github
+            <button className="provider-button provider-disabled" type="button" onClick={() => showProviderSetup("GitHub")} disabled={loading}>
+              <Github size={24} /> Github <small>Coming soon</small>
             </button>
             <button className="provider-button" type="button" onClick={signIn} disabled={loading || !ready || !googleClientId}>
-              <span className="google-mark">G</span> Google
+              <span className="google-mark">G</span> {loading ? "Waiting..." : "Google"}
             </button>
-            <button className="provider-button provider-wide" type="button" onClick={() => showProviderSetup("SSO")} disabled={loading}>
-              <KeyRound size={24} /> SSO
+            <button className="provider-button provider-wide provider-disabled" type="button" onClick={() => showProviderSetup("SSO")} disabled={loading}>
+              <KeyRound size={24} /> SSO <small>Coming soon</small>
             </button>
           </div>
           <div className="login-divider"><span>OR</span></div>
@@ -378,7 +374,7 @@ function LoginGate({ onLogin }: { onLogin: (session: Session) => void }) {
             {loading ? "Signing in..." : "Sign in"}
           </button>
           {error && <p className="login-error">{error}</p>}
-          <small>Don't have an account? <button type="button" onClick={signIn} disabled={loading || !ready || !googleClientId}>Sign up</button></small>
+          <small>Don't have an account? <button type="button" onClick={signIn} disabled={loading || !ready || !googleClientId}>Sign up with Google</button></small>
         </aside>
       </section>
     </main>
