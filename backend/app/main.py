@@ -729,7 +729,7 @@ fi
 
 curl -fsSL -X POST "${API_URL}/api/agent/heartbeat" \
   -H "Content-Type: application/json" \
-  -d "{\"token\":\"${CLOUDMETER_TOKEN}\",\"cluster_name\":\"${CLOUDMETER_CLUSTER}\",\"provider\":\"${CLOUDMETER_PROVIDER:-Kubernetes}\",\"status\":\"installing\"}" >/dev/null || true
+  -d '{"token":"'"${CLOUDMETER_TOKEN}"'","cluster_name":"'"${CLOUDMETER_CLUSTER}"'","provider":"'"${CLOUDMETER_PROVIDER:-Kubernetes}"'","status":"installing"}' >/dev/null || true
 
 kubectl create namespace cloudmeter-agent --dry-run=client -o yaml | kubectl apply -f -
 kubectl create serviceaccount cloudmeter-agent -n cloudmeter-agent --dry-run=client -o yaml | kubectl apply -f -
@@ -797,7 +797,7 @@ EOF
 
 curl -fsSL -X POST "${API_URL}/api/agent/heartbeat" \
   -H "Content-Type: application/json" \
-  -d "{\"token\":\"${CLOUDMETER_TOKEN}\",\"cluster_name\":\"${CLOUDMETER_CLUSTER}\",\"provider\":\"${CLOUDMETER_PROVIDER:-Kubernetes}\",\"status\":\"connected\"}" >/dev/null || true
+  -d '{"token":"'"${CLOUDMETER_TOKEN}"'","cluster_name":"'"${CLOUDMETER_CLUSTER}"'","provider":"'"${CLOUDMETER_PROVIDER:-Kubernetes}"'","status":"connected"}' >/dev/null || true
 
 echo "CloudMeter read-only agent installed for ${CLOUDMETER_CLUSTER}."
 echo "Verify with: kubectl get pods -n cloudmeter-agent"

@@ -277,3 +277,12 @@ def test_sso_oauth_callback_creates_session(client, db_session, monkeypatch):
     account = db_session.query(UserAccount).filter(UserAccount.email == "sso@example.com").first()
     assert account.provider == "sso"
     assert account.sso_sub == "sso-sub-1"
+
+
+def test_agent_install_script_uses_valid_shell_json(client):
+    response = client.get("/api/agent/install.sh")
+
+    assert response.status_code == 200
+    script = response.text
+    assert '-d \'{"token":"\'"${CLOUDMETER_TOKEN}"\'"' in script
+    assert '"cluster_name":"\'"${CLOUDMETER_CLUSTER}"\'"' in script
