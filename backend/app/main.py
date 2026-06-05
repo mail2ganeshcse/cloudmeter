@@ -918,7 +918,14 @@ curl -fsSL -X POST "${API_URL}/api/agent/heartbeat" \
 
 kubectl create namespace cloudmeter-agent --dry-run=client -o yaml | kubectl apply -f -
 kubectl create serviceaccount cloudmeter-agent -n cloudmeter-agent --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -f - <<EOF
+cat <<'EOF' | sed \
+  -e "s#__AGENT_NAME__#${AGENT_NAME}#g" \
+  -e "s#__CLUSTER_SLUG__#${CLUSTER_SLUG}#g" \
+  -e "s#__CLOUDMETER_TOKEN__#${CLOUDMETER_TOKEN}#g" \
+  -e "s#__CLOUDMETER_CLUSTER__#${CLOUDMETER_CLUSTER}#g" \
+  -e "s#__CLOUDMETER_PROVIDER__#${CLOUDMETER_PROVIDER:-Kubernetes}#g" \
+  -e "s#__API_URL__#${API_URL}#g" \
+  | kubectl apply -f -
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -953,19 +960,19 @@ roleRef:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ${AGENT_NAME}
+  name: __AGENT_NAME__
   namespace: cloudmeter-agent
 spec:
   replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: cloudmeter-agent
-      app.kubernetes.io/instance: ${CLUSTER_SLUG}
+      app.kubernetes.io/instance: __CLUSTER_SLUG__
   template:
     metadata:
       labels:
         app.kubernetes.io/name: cloudmeter-agent
-        app.kubernetes.io/instance: ${CLUSTER_SLUG}
+        app.kubernetes.io/instance: __CLUSTER_SLUG__
     spec:
       serviceAccountName: cloudmeter-agent
       containers:
@@ -1040,33 +1047,41 @@ spec:
               done
           env:
             - name: CLOUDMETER_TOKEN
-              value: "${CLOUDMETER_TOKEN}"
+              value: "__CLOUDMETER_TOKEN__"
             - name: CLOUDMETER_CLUSTER
-              value: "${CLOUDMETER_CLUSTER}"
+              value: "__CLOUDMETER_CLUSTER__"
             - name: CLOUDMETER_PROVIDER
-              value: "${CLOUDMETER_PROVIDER:-Kubernetes}"
+              value: "__CLOUDMETER_PROVIDER__"
             - name: CLOUDMETER_API_URL
-              value: "${API_URL}"
+              value: "__API_URL__"
 EOF
 
 NETWORK_AGENT_NAME="cloudmeter-network-agent-${CLUSTER_SLUG}"
-kubectl apply -f - <<EOF
+cat <<'EOF' | sed \
+  -e "s#__NETWORK_AGENT_NAME__#${NETWORK_AGENT_NAME}#g" \
+  -e "s#__CLUSTER_SLUG__#${CLUSTER_SLUG}#g" \
+  -e "s#__CLOUDMETER_TOKEN__#${CLOUDMETER_TOKEN}#g" \
+  -e "s#__CLOUDMETER_CLUSTER__#${CLOUDMETER_CLUSTER}#g" \
+  -e "s#__CLOUDMETER_PROVIDER__#${CLOUDMETER_PROVIDER:-Kubernetes}#g" \
+  -e "s#__API_URL__#${API_URL}#g" \
+  -e "s#__PROMETHEUS_URL__#${CLOUDMETER_PROMETHEUS_URL:-}#g" \
+  | kubectl apply -f -
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ${NETWORK_AGENT_NAME}
+  name: __NETWORK_AGENT_NAME__
   namespace: cloudmeter-agent
 spec:
   replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: cloudmeter-network-agent
-      app.kubernetes.io/instance: ${CLUSTER_SLUG}
+      app.kubernetes.io/instance: __CLUSTER_SLUG__
   template:
     metadata:
       labels:
         app.kubernetes.io/name: cloudmeter-network-agent
-        app.kubernetes.io/instance: ${CLUSTER_SLUG}
+        app.kubernetes.io/instance: __CLUSTER_SLUG__
     spec:
       serviceAccountName: cloudmeter-agent
       containers:
@@ -1202,15 +1217,15 @@ spec:
                 time.sleep(300)
           env:
             - name: CLOUDMETER_TOKEN
-              value: "${CLOUDMETER_TOKEN}"
+              value: "__CLOUDMETER_TOKEN__"
             - name: CLOUDMETER_CLUSTER
-              value: "${CLOUDMETER_CLUSTER}"
+              value: "__CLOUDMETER_CLUSTER__"
             - name: CLOUDMETER_PROVIDER
-              value: "${CLOUDMETER_PROVIDER:-Kubernetes}"
+              value: "__CLOUDMETER_PROVIDER__"
             - name: CLOUDMETER_API_URL
-              value: "${API_URL}"
+              value: "__API_URL__"
             - name: CLOUDMETER_PROMETHEUS_URL
-              value: "${CLOUDMETER_PROMETHEUS_URL:-}"
+              value: "__PROMETHEUS_URL__"
 EOF
 
 curl -fsSL -X POST "${API_URL}/api/agent/heartbeat" \
