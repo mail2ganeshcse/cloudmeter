@@ -679,6 +679,44 @@ function App() {
   const aiRows = data.aiUsage.slice(0, 6);
   const isSuperadmin = session?.session.role === "superadmin";
   const limited = session?.session.role !== "admin" && !isSuperadmin;
+  const pageCopy: Record<string, { title: string; body: string; icon: any }> = {
+    Command: {
+      title: "Command center",
+      body: "One place to watch cloud, Kubernetes, AI usage, forecasts and customer billing health.",
+      icon: Gauge,
+    },
+    Cloud: {
+      title: "Cloud cost ledger",
+      body: "Connect AWS, GCP, OCI and Azure billing exports, normalize tags and allocate spend to teams or customers.",
+      icon: Cloud,
+    },
+    Kubernetes: {
+      title: "Kubernetes costing and chargeback",
+      body: "Onboard clusters, track namespace and pod cost, then produce team-level chargeback without write access.",
+      icon: Boxes,
+    },
+    "AI Metering": {
+      title: "AI usage billing",
+      body: "Meter OpenAI, Claude, Gemini, Mistral and Ollama by tokens, requests, documents, storage and GPU usage.",
+      icon: Brain,
+    },
+    Invoices: {
+      title: "Invoice generation",
+      body: "Turn cloud, Kubernetes and AI usage into customer-ready invoices with transparent line items.",
+      icon: Receipt,
+    },
+    Alerts: {
+      title: "Budget alerts and recommendations",
+      body: "Catch anomalies, budget overruns and optimization opportunities before month-end surprises.",
+      icon: Bell,
+    },
+    "User Management": {
+      title: "User management",
+      body: "Superadmin-only workspace for users, roles, sessions and account visibility.",
+      icon: Users,
+    },
+  };
+  const ActiveIcon = pageCopy[activeView]?.icon ?? Gauge;
 
   useEffect(() => {
     if (!isSuperadmin) {
@@ -818,173 +856,252 @@ function App() {
           </section>
         )}
 
-        <section className="hero">
+        <section className="page-title">
+          <div className="page-icon"><ActiveIcon size={24} /></div>
           <div>
-            <span className="eyebrow">Unified cloud, Kubernetes and AI usage billing</span>
-            <h1>Stripe-style metering for complex infra spend.</h1>
-            <p>
-              Track AWS, OCI, GCP, on-prem Kubernetes and AI providers, then generate transparent chargeback and invoices for every team or customer.
-            </p>
-          </div>
-          <div className="hero-panel">
-            <span>June forecast</span>
-            <strong>{formatInr(data.metrics.forecast_total_inr)}</strong>
-            <div className="forecast-grid">
-              <label><Cloud size={16} /> Cloud {formatInr(data.metrics.cloud_spend_inr)}</label>
-              <label><Boxes size={16} /> K8s {formatInr(data.metrics.kubernetes_spend_inr)}</label>
-              <label><Brain size={16} /> AI {formatInr(data.metrics.ai_spend_inr)}</label>
-            </div>
+            <span className="eyebrow">{activeView}</span>
+            <h1>{pageCopy[activeView]?.title}</h1>
+            <p>{pageCopy[activeView]?.body}</p>
           </div>
         </section>
 
-        <section className="stats-grid">
-          <Stat icon={WalletCards} label="Spend captured" value={formatInr(data.metrics.total_spend_inr)} signal="Cloud + K8s + AI" />
-          <Stat icon={Brain} label="AI tokens billed" value={compact(data.metrics.tokens)} signal={`${compact(data.metrics.requests)} requests`} />
-          <Stat icon={Cpu} label="GPU metered" value={`${data.metrics.gpu_hours} hrs`} signal="Ollama + workloads" />
-          <Stat icon={FileText} label="Invoice value" value={formatInr(data.metrics.invoice_total_inr)} signal={`${data.metrics.active_customers} active customers`} />
-        </section>
-
-        <section className="onboarding-panel">
-          <div className="onboarding-copy">
-            <span className="eyebrow">Company onboarding</span>
-            <h2>Connect Kubernetes with one read-only command.</h2>
-            <p>
-              Invite a customer, choose AWS EKS, GKE, OCI OKE, on-prem or generic Kubernetes, then run the generated command from terminal or cloud shell.
-            </p>
-            <div className="prereqs">
-              {(onboarding?.prerequisites ?? ["kubectl access", "curl installed", "outbound HTTPS"]).map((item) => (
-                <label key={item}><CheckCircle2 size={16} /> {item}</label>
-              ))}
-            </div>
-          </div>
-          <div className="cluster-stack">
-            {(onboarding?.clusters ?? []).slice(0, limited ? 1 : 3).map((cluster) => (
-              <article className="cluster-card" key={cluster.id}>
-                <div>
-                  <strong>{cluster.clusterName}</strong>
-                  <span>{cluster.provider} · {cluster.environment} · {cluster.agentMode}</span>
+        {activeView === "Command" && (
+          <>
+            <section className="hero">
+              <div>
+                <span className="eyebrow">Unified cloud, Kubernetes and AI usage billing</span>
+                <h1>Stripe-style metering for complex infra spend.</h1>
+                <p>
+                  Track AWS, OCI, GCP, on-prem Kubernetes and AI providers, then generate transparent chargeback and invoices for every team or customer.
+                </p>
+              </div>
+              <div className="hero-panel">
+                <span>June forecast</span>
+                <strong>{formatInr(data.metrics.forecast_total_inr)}</strong>
+                <div className="forecast-grid">
+                  <label><Cloud size={16} /> Cloud {formatInr(data.metrics.cloud_spend_inr)}</label>
+                  <label><Boxes size={16} /> K8s {formatInr(data.metrics.kubernetes_spend_inr)}</label>
+                  <label><Brain size={16} /> AI {formatInr(data.metrics.ai_spend_inr)}</label>
                 </div>
-                <em className={cluster.status}>{cluster.status}</em>
-                <code>{cluster.installCommand}</code>
-                <div className="cluster-actions">
-                  <button onClick={() => copyCommand(cluster.installCommand, cluster.clusterName)}><Copy size={16} /> {copied === cluster.clusterName ? "Copied" : "Copy install"}</button>
-                  <button onClick={() => copyCommand(cluster.verifyCommand, `${cluster.clusterName}-verify`)}><Terminal size={16} /> Verify</button>
+              </div>
+            </section>
+
+            <section className="stats-grid">
+              <Stat icon={WalletCards} label="Spend captured" value={formatInr(data.metrics.total_spend_inr)} signal="Cloud + K8s + AI" />
+              <Stat icon={Brain} label="AI tokens billed" value={compact(data.metrics.tokens)} signal={`${compact(data.metrics.requests)} requests`} />
+              <Stat icon={Cpu} label="GPU metered" value={`${data.metrics.gpu_hours} hrs`} signal="Ollama + workloads" />
+              <Stat icon={FileText} label="Invoice value" value={formatInr(data.metrics.invoice_total_inr)} signal={`${data.metrics.active_customers} active customers`} />
+            </section>
+
+            <section className="grid two">
+              <article className="panel recommendation">
+                <div className="panel-head"><div><span>AI Recommendations</span><h2>Optimization playbook</h2></div><LineChart size={22} /></div>
+                {data.recommendations.slice(0, 4).map((item) => (
+                  <p key={item}><Activity size={16} /> {item}</p>
+                ))}
+              </article>
+              <article className="panel">
+                <div className="panel-head"><div><span>Budget Alerts</span><h2>Needs attention</h2></div><AlertTriangle size={22} /></div>
+                <div className="alerts">
+                  {data.alerts.slice(0, 3).map((alert) => (
+                    <div className={`alert ${alert.severity}`} key={`${alert.owner}`}>
+                      <strong>{alert.owner}</strong>
+                      <span>{alert.message}</span>
+                      <label>{formatInr(Number(alert.current))} of {formatInr(Number(alert.threshold))}</label>
+                    </div>
+                  ))}
                 </div>
               </article>
-            ))}
-          </div>
-        </section>
+            </section>
+          </>
+        )}
 
-        <section className="grid two">
-          <article className="panel">
-            <div className="panel-head"><div><span>Provider Cost</span><h2>Multi-cloud ledger</h2></div><Cloud size={22} /></div>
-            <div className="list">
-              {data.cloudProviders.map((item) => (
-                <div className="row" key={item.name}>
-                  <span className={`badge ${item.name.toLowerCase()}`}>{item.name}</span>
-                  <Bar value={item.amount} max={maxProvider} />
-                  <strong>{formatInr(item.amount)}</strong>
+        {activeView === "Cloud" && (
+          <>
+            <section className="stats-grid">
+              <Stat icon={Cloud} label="Cloud spend" value={formatInr(data.metrics.cloud_spend_inr)} signal="AWS + GCP + OCI" />
+              <Stat icon={LineChart} label="Forecast" value={formatInr(data.metrics.forecast_total_inr)} signal="All providers" />
+              <Stat icon={Building2} label="Customers" value={`${data.metrics.active_customers}`} signal="Active billing owners" />
+              <Stat icon={ShieldCheck} label="Access mode" value="Read-only" signal="Billing export sync" />
+            </section>
+            <section className="grid two">
+              <article className="panel">
+                <div className="panel-head"><div><span>Provider Cost</span><h2>Multi-cloud ledger</h2></div><Cloud size={22} /></div>
+                <div className="list">
+                  {data.cloudProviders.map((item) => (
+                    <div className="row" key={item.name}>
+                      <span className={`badge ${item.name.toLowerCase()}`}>{item.name}</span>
+                      <Bar value={item.amount} max={maxProvider} />
+                      <strong>{formatInr(item.amount)}</strong>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </article>
-
-          <article className="panel">
-            <div className="panel-head"><div><span>AI Usage Billing</span><h2>Models and dimensions</h2></div><Zap size={22} /></div>
-            <div className="list">
-              {data.aiProviders.map((item) => (
-                <div className="row ai" key={item.name}>
-                  <span className="badge ai-badge">{item.name}</span>
-                  <Bar value={item.amount} max={maxAi} />
-                  <strong>{formatInr(item.amount)}</strong>
-                  <small>{compact(item.tokens)} tokens</small>
+              </article>
+              <article className="panel">
+                <div className="panel-head"><div><span>Connect Cloud</span><h2>Billing integrations</h2></div><PlugZap size={22} /></div>
+                <div className="feature-list">
+                  {["AWS CUR + Cost Explorer", "GCP BigQuery billing export", "OCI usage reports", "Azure Cost Management"].map((item) => (
+                    <label key={item}><CheckCircle2 size={16} /> {item}</label>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </article>
-        </section>
+              </article>
+            </section>
+          </>
+        )}
 
-        <section className="grid main-grid">
-          <article className="panel wide">
-            <div className="panel-head"><div><span>Kubernetes Costing</span><h2>Namespace and pod-level chargeback</h2></div><ServerCog size={22} /></div>
-            <table>
-              <thead><tr><th>Namespace</th><th>Workload</th><th>Team</th><th>CPU</th><th>GPU</th><th>Cost</th></tr></thead>
-              <tbody>
-                {k8sRows.map((row) => (
-                  <tr key={`${row.namespace}-${row.workload}`}>
-                    <td>{row.namespace}</td><td>{row.workload}</td><td>{row.team}</td><td>{compact(Number(row.cpu))}</td><td>{row.gpu}</td><td>{formatInr(Number(row.amount))}</td>
-                  </tr>
+        {activeView === "Kubernetes" && (
+          <>
+            <section className="onboarding-panel">
+              <div className="onboarding-copy">
+                <span className="eyebrow">Company onboarding</span>
+                <h2>Connect Kubernetes with one read-only command.</h2>
+                <p>
+                  Invite a customer, choose AWS EKS, GKE, OCI OKE, on-prem or generic Kubernetes, then run the generated command from terminal or cloud shell.
+                </p>
+                <div className="prereqs">
+                  {(onboarding?.prerequisites ?? ["kubectl access", "curl installed", "outbound HTTPS"]).map((item) => (
+                    <label key={item}><CheckCircle2 size={16} /> {item}</label>
+                  ))}
+                </div>
+              </div>
+              <div className="cluster-stack">
+                {(onboarding?.clusters ?? []).slice(0, limited ? 1 : 3).map((cluster) => (
+                  <article className="cluster-card" key={cluster.id}>
+                    <div>
+                      <strong>{cluster.clusterName}</strong>
+                      <span>{cluster.provider} · {cluster.environment} · {cluster.agentMode}</span>
+                    </div>
+                    <em className={cluster.status}>{cluster.status}</em>
+                    <code>{cluster.installCommand}</code>
+                    <div className="cluster-actions">
+                      <button onClick={() => copyCommand(cluster.installCommand, cluster.clusterName)}><Copy size={16} /> {copied === cluster.clusterName ? "Copied" : "Copy install"}</button>
+                      <button onClick={() => copyCommand(cluster.verifyCommand, `${cluster.clusterName}-verify`)}><Terminal size={16} /> Verify</button>
+                    </div>
+                  </article>
                 ))}
-              </tbody>
-            </table>
-          </article>
-
-          <article className="panel">
-            <div className="panel-head"><div><span>Chargeback</span><h2>Owners</h2></div><Banknote size={22} /></div>
-            <div className="chargeback">
-              {data.teamChargeback.slice(0, 8).map((item) => (
-                <div key={item.team}>
-                  <label>{item.team}<strong>{formatInr(item.amount)}</strong></label>
-                  <Bar value={item.amount} max={maxTeam} />
+              </div>
+            </section>
+            <section className="grid main-grid">
+              <article className="panel wide">
+                <div className="panel-head"><div><span>Kubernetes Costing</span><h2>Namespace and pod-level chargeback</h2></div><ServerCog size={22} /></div>
+                <table>
+                  <thead><tr><th>Namespace</th><th>Workload</th><th>Team</th><th>CPU</th><th>GPU</th><th>Cost</th></tr></thead>
+                  <tbody>
+                    {k8sRows.map((row) => (
+                      <tr key={`${row.namespace}-${row.workload}`}>
+                        <td>{row.namespace}</td><td>{row.workload}</td><td>{row.team}</td><td>{compact(Number(row.cpu))}</td><td>{row.gpu}</td><td>{formatInr(Number(row.amount))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </article>
+              <article className="panel">
+                <div className="panel-head"><div><span>Chargeback</span><h2>Owners</h2></div><Banknote size={22} /></div>
+                <div className="chargeback">
+                  {data.teamChargeback.slice(0, 8).map((item) => (
+                    <div key={item.team}>
+                      <label>{item.team}<strong>{formatInr(item.amount)}</strong></label>
+                      <Bar value={item.amount} max={maxTeam} />
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </article>
-        </section>
+              </article>
+            </section>
+          </>
+        )}
 
-        <section className="grid main-grid">
-          <article className="panel wide">
-            <div className="panel-head"><div><span>AI Metering</span><h2>Tokens, requests, documents, storage and GPU</h2></div><Layers3 size={22} /></div>
-            <table>
-              <thead><tr><th>Product</th><th>Provider</th><th>Model</th><th>Requests</th><th>Docs</th><th>Bill</th></tr></thead>
-              <tbody>
-                {aiRows.map((row) => (
-                  <tr key={`${row.provider}-${row.model}-${row.product}`}>
-                    <td>{row.product}</td><td>{row.provider}</td><td>{row.model}</td><td>{compact(Number(row.requests))}</td><td>{compact(Number(row.documents))}</td><td>{formatInr(Number(row.amount))}</td>
-                  </tr>
+        {activeView === "AI Metering" && (
+          <>
+            <section className="stats-grid">
+              <Stat icon={Brain} label="AI spend" value={formatInr(data.metrics.ai_spend_inr)} signal="All model providers" />
+              <Stat icon={Zap} label="Requests" value={compact(data.metrics.requests)} signal="Metered API calls" />
+              <Stat icon={Layers3} label="Tokens" value={compact(data.metrics.tokens)} signal="Input + output" />
+              <Stat icon={Cpu} label="GPU" value={`${data.metrics.gpu_hours} hrs`} signal="Private AI workloads" />
+            </section>
+            <section className="grid main-grid">
+              <article className="panel wide">
+                <div className="panel-head"><div><span>AI Metering</span><h2>Tokens, requests, documents, storage and GPU</h2></div><Layers3 size={22} /></div>
+                <table>
+                  <thead><tr><th>Product</th><th>Provider</th><th>Model</th><th>Requests</th><th>Docs</th><th>Bill</th></tr></thead>
+                  <tbody>
+                    {aiRows.map((row) => (
+                      <tr key={`${row.provider}-${row.model}-${row.product}`}>
+                        <td>{row.product}</td><td>{row.provider}</td><td>{row.model}</td><td>{compact(Number(row.requests))}</td><td>{compact(Number(row.documents))}</td><td>{formatInr(Number(row.amount))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </article>
+              <article className="panel">
+                <div className="panel-head"><div><span>AI Usage Billing</span><h2>Models and dimensions</h2></div><Zap size={22} /></div>
+                <div className="list">
+                  {data.aiProviders.map((item) => (
+                    <div className="row ai" key={item.name}>
+                      <span className="badge ai-badge">{item.name}</span>
+                      <Bar value={item.amount} max={maxAi} />
+                      <strong>{formatInr(item.amount)}</strong>
+                      <small>{compact(item.tokens)} tokens</small>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            </section>
+          </>
+        )}
+
+        {activeView === "Invoices" && (
+          <section className="grid main-grid">
+            <article className="panel wide">
+              <div className="panel-head"><div><span>Invoice Generation</span><h2>Customer-ready bills</h2></div><Receipt size={22} /></div>
+              <div className="invoice-list">
+                {data.invoices.map((invoice) => (
+                  <div key={invoice.invoiceNo}>
+                    <span>{invoice.invoiceNo}</span>
+                    <strong>{formatInr(Number(invoice.total))}</strong>
+                    <em>{invoice.status}</em>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-          </article>
+              </div>
+            </article>
+            <article className="panel">
+              <div className="panel-head"><div><span>Chargeback</span><h2>Billable owners</h2></div><Banknote size={22} /></div>
+              <div className="chargeback">
+                {data.teamChargeback.slice(0, 8).map((item) => (
+                  <div key={item.team}>
+                    <label>{item.team}<strong>{formatInr(item.amount)}</strong></label>
+                    <Bar value={item.amount} max={maxTeam} />
+                  </div>
+                ))}
+              </div>
+            </article>
+          </section>
+        )}
 
-          <article className="panel">
-            <div className="panel-head"><div><span>Budget Alerts</span><h2>Needs attention</h2></div><AlertTriangle size={22} /></div>
-            <div className="alerts">
-              {data.alerts.map((alert) => (
-                <div className={`alert ${alert.severity}`} key={`${alert.owner}`}>
-                  <strong>{alert.owner}</strong>
-                  <span>{alert.message}</span>
-                  <label>{formatInr(Number(alert.current))} of {formatInr(Number(alert.threshold))}</label>
-                </div>
+        {activeView === "Alerts" && (
+          <section className="grid main-grid">
+            <article className="panel wide">
+              <div className="panel-head"><div><span>Budget Alerts</span><h2>Needs attention</h2></div><AlertTriangle size={22} /></div>
+              <div className="alerts">
+                {data.alerts.map((alert) => (
+                  <div className={`alert ${alert.severity}`} key={`${alert.owner}`}>
+                    <strong>{alert.owner}</strong>
+                    <span>{alert.message}</span>
+                    <label>{formatInr(Number(alert.current))} of {formatInr(Number(alert.threshold))}</label>
+                  </div>
+                ))}
+              </div>
+            </article>
+            <article className="panel recommendation">
+              <div className="panel-head"><div><span>AI Recommendations</span><h2>Optimization playbook</h2></div><LineChart size={22} /></div>
+              {data.recommendations.map((item) => (
+                <p key={item}><Activity size={16} /> {item}</p>
               ))}
-            </div>
-          </article>
-        </section>
+            </article>
+          </section>
+        )}
 
-        <section className="grid two bottom">
-          <article className="panel">
-            <div className="panel-head"><div><span>Invoice Generation</span><h2>Customer-ready bills</h2></div><Receipt size={22} /></div>
-            <div className="invoice-list">
-              {data.invoices.map((invoice) => (
-                <div key={invoice.invoiceNo}>
-                  <span>{invoice.invoiceNo}</span>
-                  <strong>{formatInr(Number(invoice.total))}</strong>
-                  <em>{invoice.status}</em>
-                </div>
-              ))}
-            </div>
-          </article>
-
-          <article className="panel recommendation">
-            <div className="panel-head"><div><span>AI Recommendations</span><h2>Optimization playbook</h2></div><LineChart size={22} /></div>
-            {data.recommendations.map((item) => (
-              <p key={item}><Activity size={16} /> {item}</p>
-            ))}
-          </article>
-        </section>
-
-        {isSuperadmin && (
-          <section className="panel user-management">
+        {isSuperadmin && activeView === "User Management" && (
+          <section className="panel user-management page-panel">
             <div className="panel-head"><div><span>Superadmin</span><h2>User Management</h2></div><Users size={22} /></div>
             {usersError ? (
               <p className="login-error">{usersError}</p>

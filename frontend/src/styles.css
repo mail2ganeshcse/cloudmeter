@@ -903,6 +903,69 @@ input {
   border: 1px solid rgba(18, 114, 79, 0.2);
 }
 
+.page-title {
+  min-height: 132px;
+  margin-top: 18px;
+  padding: 22px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 16px;
+  align-items: center;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(16, 32, 28, 0.09);
+  box-shadow: 0 18px 45px rgba(16, 32, 28, 0.06);
+}
+
+.page-title h1 {
+  max-width: none;
+  margin-top: 4px;
+  font-size: clamp(30px, 4vw, 46px);
+  line-height: 1.05;
+}
+
+.page-title p {
+  max-width: 850px;
+  margin-top: 8px;
+  color: #53635d;
+  line-height: 1.55;
+}
+
+.page-title .eyebrow {
+  margin-bottom: 0;
+  color: #12724f;
+}
+
+.page-icon {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: #10201c;
+  background: linear-gradient(135deg, #9cedc8, #f5bd4f);
+}
+
+.feature-list {
+  display: grid;
+  gap: 10px;
+}
+
+.feature-list label {
+  min-height: 44px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border-radius: 8px;
+  color: #243933;
+  background: #f2f7f3;
+}
+
+.page-panel {
+  margin-top: 16px;
+}
+
 .password-link-panel {
   margin-top: 16px;
   padding: 14px;
@@ -1445,6 +1508,10 @@ td:last-child {
   }
 
   .password-link-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .page-title {
     grid-template-columns: 1fr;
   }
 
