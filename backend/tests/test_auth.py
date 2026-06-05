@@ -174,3 +174,18 @@ def test_password_login_rejects_bad_password(client, monkeypatch):
     login = client.post("/api/auth/login", json={"username": "badpass@gmail.com", "password": "wrong-password"})
 
     assert login.status_code == 401
+
+
+def test_authenticated_user_can_set_local_password(client, monkeypatch):
+    monkeypatch.setattr("app.main.id_token.verify_oauth2_token", lambda *args: google_claims(email="setpass@gmail.com"))
+    google = client.post("/api/auth/google", json={"credential": "header.payload.signature"})
+    assert google.status_code == 200
+    assert google.json()["user"]["hasPassword"] is False
+
+    set_password = client.post("/api/auth/password", json={"password": "cloudmeter123"})
+    assert set_password.status_code == 200
+    assert set_password.json()["user"]["hasPassword"] is True
+    client.post("/api/auth/logout")
+
+    login = client.post("/api/auth/login", json={"username": "setpass@gmail.com", "password": "cloudmeter123"})
+    assert login.status_code == 200

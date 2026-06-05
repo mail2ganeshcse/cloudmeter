@@ -320,6 +320,57 @@ input {
   border: 1px solid rgba(18, 114, 79, 0.2);
 }
 
+.password-link-panel {
+  margin-top: 16px;
+  padding: 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px auto;
+  gap: 12px;
+  align-items: center;
+  border-radius: 8px;
+  color: #10201c;
+  background: #fff7df;
+  border: 1px solid rgba(184, 119, 15, 0.22);
+}
+
+.password-link-panel strong,
+.password-link-panel span,
+.password-link-panel small {
+  display: block;
+}
+
+.password-link-panel span,
+.password-link-panel small {
+  color: #66776f;
+}
+
+.password-link-panel input {
+  height: 42px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid rgba(16, 32, 28, 0.15);
+  border-radius: 8px;
+  outline: 0;
+}
+
+.password-link-panel button {
+  height: 42px;
+  border: 0;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  color: #10201c;
+  background: #f5bd4f;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.password-link-panel small {
+  grid-column: 1 / -1;
+}
+
 .hero {
   margin-top: 22px;
   min-height: 290px;
@@ -793,6 +844,10 @@ td:last-child {
 
   .hero {
     padding: 24px;
+  }
+
+  .password-link-panel {
+    grid-template-columns: 1fr;
   }
 
   .login-shell {

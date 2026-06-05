@@ -356,6 +356,8 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
   const [usersError, setUsersError] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [passwordMessage, setPasswordMessage] = useState("");
 
   useEffect(() => {
     fetch(`${apiUrl}/api/auth/me`, { credentials: "include" })
@@ -415,6 +417,32 @@ function App() {
       .finally(() => setSession(null));
   }
 
+  function saveLocalPassword() {
+    if (newPassword.length < 8) {
+      setPasswordMessage("Password must be at least 8 characters.");
+      return;
+    }
+    fetch(`${apiUrl}/api/auth/password`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: newPassword }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ detail: "Could not save password" }));
+          throw new Error(body.detail ?? "Could not save password");
+        }
+        return res.json();
+      })
+      .then((updatedSession) => {
+        setSession(updatedSession);
+        setNewPassword("");
+        setPasswordMessage("Password saved. You can now login without Google.");
+      })
+      .catch((err: Error) => setPasswordMessage(err.message));
+  }
+
   if (authLoading) {
     return (
       <main className="login-shell">
@@ -472,6 +500,23 @@ function App() {
                 ? `${session.user.email} is the master superadmin account with full workspace and user-management access.`
                 : `${session.user.email} is in limited mode: dashboard view, one cluster onboarding, read-only reports, no invoice sending.`}
             </span>
+          </section>
+        )}
+
+        {!session.user.hasPassword && (
+          <section className="password-link-panel">
+            <div>
+              <strong>Set local login password</strong>
+              <span>Google is connected for {session.user.email}. Add a CloudMeter password to login later without opening Google.</span>
+            </div>
+            <input
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+              type="password"
+              placeholder="Minimum 8 characters"
+            />
+            <button onClick={saveLocalPassword}><KeyRound size={16} /> Save password</button>
+            {passwordMessage && <small>{passwordMessage}</small>}
           </section>
         )}
 

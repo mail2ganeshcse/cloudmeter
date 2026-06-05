@@ -66,6 +66,10 @@ class PasswordLoginRequest(BaseModel):
     password: str
 
 
+class SetPasswordRequest(BaseModel):
+    password: str
+
+
 class ClusterCreateRequest(BaseModel):
     customer_id: int
     cluster_name: str
@@ -352,6 +356,15 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)) 
         db.commit()
     clear_session_cookie(response)
     return {"status": "ok"}
+
+
+@app.post("/api/auth/password")
+def set_password(payload: SetPasswordRequest, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user, _ = current_user_from_cookie(request, db)
+    set_local_password(user, user.email, payload.password)
+    db.commit()
+    db.refresh(user)
+    return session_payload(user)
 
 
 @app.get("/api/users")
