@@ -1,0 +1,491 @@
+from collections import defaultdict
+from datetime import UTC, datetime, timedelta
+from hashlib import sha256
+from secrets import token_urlsafe
+from typing import Any
+
+import certifi
+import requests
+from google.auth.exceptions import GoogleAuthError, TransportError
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from .database import Base, SessionLocal, engine, get_db
+from pydantic import BaseModel
+
+from .models import (
+    AiUsage,
+    BudgetAlert,
+    CloudSpend,
+    ClusterConnection,
+    Customer,
+    Invoice,
+    KubernetesCost,
+    UserAccount,
+    UserSession,
+)
+from .seed import seed_if_empty
+from .settings import settings
+
+app = FastAPI(title="CloudMeter AI API", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[origin.strip() for origin in settings.cors_origins.split(",")],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.on_event("startup")
+def startup() -> None:
+    Base.metadata.create_all(bind=engine)
+    with SessionLocal() as db:
+        seed_if_empty(db)
+
+
+def money(value: float | None) -> int:
+    return round(value or 0)
+
+
+class GoogleLoginRequest(BaseModel):
+    credential: str
+
+
+class ClusterCreateRequest(BaseModel):
+    customer_id: int
+    cluster_name: str
+    provider: str
+    environment: str = "Production"
+
+
+def cluster_install_command(cluster: ClusterConnection) -> str:
+    return (
+        "CLOUDMETER_TOKEN={token} CLOUDMETER_CLUSTER={cluster} "
+        "CLOUDMETER_PROVIDER='{provider}' "
+        "/bin/bash -c \"$(curl -fsSL http://localhost:8001/api/agent/install.sh)\""
+    ).format(token=cluster.token, cluster=cluster.cluster_name, provider=cluster.provider)
+
+
+def token_hash(token: str) -> str:
+    return sha256(token.encode("utf-8")).hexdigest()
+
+
+def role_for_email(email: str) -> str:
+    domain = email.split("@")[-1].lower() if "@" in email else ""
+    return "admin" if domain in {"cloudmeter.ai", "example.com"} else "viewer"
+
+
+def limits_for_role(role: str) -> dict[str, bool | int]:
+    return {
+        "canViewDashboard": True,
+        "canCreateInvoices": role == "admin",
+        "canConnectClusters": True,
+        "maxClusters": 1 if role == "viewer" else 25,
+        "dataRetentionDays": 7 if role == "viewer" else 365,
+    }
+
+
+def session_payload(user: UserAccount, session_token: str | None = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "session": {
+            "provider": "google",
+            "role": user.role,
+            "plan": "limited" if user.role == "viewer" else "workspace",
+        },
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "avatar": user.avatar,
+        },
+        "limits": limits_for_role(user.role),
+    }
+    if session_token:
+        payload["session"]["accessToken"] = session_token
+    return payload
+
+
+def set_session_cookie(response: Response, session_token: str, expires_at: datetime) -> None:
+    response.set_cookie(
+        key=settings.session_cookie_name,
+        value=session_token,
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite="lax",
+        expires=expires_at,
+        max_age=settings.session_ttl_days * 24 * 60 * 60,
+        path="/",
+    )
+
+
+def clear_session_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=settings.session_cookie_name,
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite="lax",
+        path="/",
+    )
+
+
+def current_user_from_cookie(request: Request, db: Session) -> tuple[UserAccount, UserSession]:
+    raw_token = request.cookies.get(settings.session_cookie_name)
+    if not raw_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+    now = datetime.now(UTC)
+    user_session = (
+        db.query(UserSession)
+        .filter(
+            UserSession.token_hash == token_hash(raw_token),
+            UserSession.revoked.is_(False),
+            UserSession.expires_at > now,
+        )
+        .first()
+    )
+    if not user_session:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+
+    user = db.query(UserAccount).filter(UserAccount.id == user_session.user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+    return user, user_session
+
+
+def verify_google_credential(credential: str) -> dict[str, Any]:
+    if credential.count(".") != 2:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google token verification failed")
+
+    session = requests.Session()
+    session.verify = certifi.where()
+    google_request = google_requests.Request(session=session)
+    try:
+        return id_token.verify_oauth2_token(credential, google_request, settings.google_client_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google token verification failed") from exc
+    except TransportError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Unable to reach Google token verification service") from exc
+    except GoogleAuthError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google token verification failed") from exc
+
+
+@app.get("/api/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.post("/api/auth/google")
+def google_login(payload: GoogleLoginRequest, response: Response, db: Session = Depends(get_db)) -> dict[str, Any]:
+    if not settings.google_client_id:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Google client ID is not configured")
+
+    claims = verify_google_credential(payload.credential)
+
+    email = str(claims.get("email", "")).lower()
+    google_sub = str(claims.get("sub", ""))
+    if not google_sub or not email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google token is missing identity claims")
+    if not claims.get("email_verified"):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google email is not verified")
+
+    now = datetime.now(UTC)
+    role = role_for_email(email)
+    user = db.query(UserAccount).filter(UserAccount.google_sub == google_sub).first()
+    if not user:
+        user = UserAccount(
+            google_sub=google_sub,
+            email=email,
+            name=str(claims.get("name") or email.split("@")[0]),
+            avatar=str(claims.get("picture") or ""),
+            role=role,
+            provider="google",
+            hosted_domain=str(claims.get("hd") or ""),
+            first_login_at=now,
+            last_login_at=now,
+        )
+        db.add(user)
+    else:
+        user.email = email
+        user.name = str(claims.get("name") or user.name)
+        user.avatar = str(claims.get("picture") or user.avatar)
+        user.role = role
+        user.hosted_domain = str(claims.get("hd") or "")
+        user.last_login_at = now
+
+    session_token = token_urlsafe(32)
+    expires_at = now + timedelta(days=settings.session_ttl_days)
+    db.flush()
+    db.add(
+        UserSession(
+            user_id=user.id,
+            token_hash=token_hash(session_token),
+            created_at=now,
+            expires_at=expires_at,
+            revoked=False,
+        )
+    )
+    db.commit()
+    db.refresh(user)
+    set_session_cookie(response, session_token, expires_at)
+
+    return session_payload(user, session_token)
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user, _ = current_user_from_cookie(request, db)
+    return session_payload(user)
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request, response: Response, db: Session = Depends(get_db)) -> dict[str, str]:
+    raw_token = request.cookies.get(settings.session_cookie_name)
+    if raw_token:
+        db.query(UserSession).filter(UserSession.token_hash == token_hash(raw_token)).update({"revoked": True})
+        db.commit()
+    clear_session_cookie(response)
+    return {"status": "ok"}
+
+
+@app.get("/api/onboarding")
+def onboarding(db: Session = Depends(get_db)) -> dict[str, Any]:
+    clusters = db.query(ClusterConnection).order_by(ClusterConnection.id.desc()).all()
+    return {
+        "steps": [
+            {"title": "Sign in with Google", "body": "Anyone can enter with a limited viewer workspace. Admins unlock invoices, chargeback edits, and more clusters."},
+            {"title": "Add customer or company", "body": "Choose SaaS, MSP, enterprise, AI platform, or on-prem operator and assign billing owners."},
+            {"title": "Connect Kubernetes", "body": "Run one read-only curl command from terminal or cloud shell. It installs the CloudMeter agent namespace and service account."},
+            {"title": "Attach cloud and AI providers", "body": "Map AWS, GCP, OCI, OpenAI, Claude, Gemini, Mistral, Ollama, storage, GPU, and document usage."},
+            {"title": "Generate chargeback and invoices", "body": "Review namespace, team, customer, and AI product bills before sending invoices."},
+        ],
+        "prerequisites": ["kubectl access to the target cluster", "curl installed", "outbound HTTPS from the cluster", "read-only RBAC approval"],
+        "clusters": [
+            {
+                "id": c.id,
+                "customerId": c.customer_id,
+                "clusterName": c.cluster_name,
+                "provider": c.provider,
+                "environment": c.environment,
+                "status": c.status,
+                "agentMode": c.agent_mode,
+                "lastSeen": c.last_seen,
+                "installCommand": cluster_install_command(c),
+                "verifyCommand": f"kubectl logs -n cloudmeter-agent -l app.kubernetes.io/name=cloudmeter-agent --tail=20",
+            }
+            for c in clusters
+        ],
+    }
+
+
+@app.post("/api/onboarding/clusters")
+def create_cluster(payload: ClusterCreateRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
+    cluster = ClusterConnection(
+        customer_id=payload.customer_id,
+        cluster_name=payload.cluster_name,
+        provider=payload.provider,
+        environment=payload.environment,
+        token=f"cm_{token_urlsafe(22)}",
+        status="pending",
+    )
+    db.add(cluster)
+    db.commit()
+    db.refresh(cluster)
+    return {
+        "id": cluster.id,
+        "clusterName": cluster.cluster_name,
+        "provider": cluster.provider,
+        "status": cluster.status,
+        "installCommand": cluster_install_command(cluster),
+        "verifyCommand": "kubectl get pods -n cloudmeter-agent",
+    }
+
+
+@app.get("/api/agent/install.sh", response_class=PlainTextResponse)
+def agent_install_script() -> str:
+    return """#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v kubectl >/dev/null 2>&1; then
+  echo "kubectl is required before installing the CloudMeter agent."
+  exit 1
+fi
+
+if [ -z "${CLOUDMETER_TOKEN:-}" ] || [ -z "${CLOUDMETER_CLUSTER:-}" ]; then
+  echo "CLOUDMETER_TOKEN and CLOUDMETER_CLUSTER are required."
+  exit 1
+fi
+
+kubectl create namespace cloudmeter-agent --dry-run=client -o yaml | kubectl apply -f -
+kubectl create serviceaccount cloudmeter-agent -n cloudmeter-agent --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f - <<EOF
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cloudmeter-readonly
+rules:
+  - apiGroups: ["", "apps", "batch", "metrics.k8s.io"]
+    resources: ["pods", "nodes", "namespaces", "deployments", "statefulsets", "daemonsets", "jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cloudmeter-readonly
+subjects:
+  - kind: ServiceAccount
+    name: cloudmeter-agent
+    namespace: cloudmeter-agent
+roleRef:
+  kind: ClusterRole
+  name: cloudmeter-readonly
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudmeter-agent
+  namespace: cloudmeter-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cloudmeter-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cloudmeter-agent
+    spec:
+      serviceAccountName: cloudmeter-agent
+      containers:
+        - name: agent
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do echo CloudMeter agent connected for ${CLOUDMETER_CLUSTER}; sleep 300; done"]
+          env:
+            - name: CLOUDMETER_TOKEN
+              value: "${CLOUDMETER_TOKEN}"
+            - name: CLOUDMETER_CLUSTER
+              value: "${CLOUDMETER_CLUSTER}"
+EOF
+
+echo "CloudMeter read-only agent installed for ${CLOUDMETER_CLUSTER}."
+echo "Verify with: kubectl get pods -n cloudmeter-agent"
+"""
+
+
+@app.get("/api/dashboard")
+def dashboard(db: Session = Depends(get_db)) -> dict[str, Any]:
+    customers = db.query(Customer).order_by(Customer.name).all()
+    cloud_total = money(db.query(func.sum(CloudSpend.amount_inr)).scalar())
+    kube_total = money(db.query(func.sum(KubernetesCost.amount_inr)).scalar())
+    ai_total = money(db.query(func.sum(AiUsage.amount_inr)).scalar())
+    invoice_total = money(db.query(func.sum(Invoice.total_inr)).scalar())
+    tokens = money(db.query(func.sum(AiUsage.tokens)).scalar())
+    requests = money(db.query(func.sum(AiUsage.requests)).scalar())
+    gpu_seconds = money(db.query(func.sum(AiUsage.gpu_seconds)).scalar())
+    forecast_total = round((cloud_total + kube_total + ai_total) * 1.16)
+
+    provider_rows = db.query(CloudSpend.provider, func.sum(CloudSpend.amount_inr)).group_by(CloudSpend.provider).all()
+    ai_rows = db.query(AiUsage.provider, func.sum(AiUsage.amount_inr), func.sum(AiUsage.tokens), func.sum(AiUsage.requests)).group_by(AiUsage.provider).all()
+    team_rows = db.query(KubernetesCost.team, func.sum(KubernetesCost.amount_inr)).group_by(KubernetesCost.team).order_by(func.sum(KubernetesCost.amount_inr).desc()).all()
+
+    namespaces = db.query(KubernetesCost).order_by(KubernetesCost.amount_inr.desc()).all()
+    ai_usage = db.query(AiUsage).order_by(AiUsage.amount_inr.desc()).all()
+    invoices = db.query(Invoice).order_by(Invoice.total_inr.desc()).all()
+    alerts = db.query(BudgetAlert).order_by(BudgetAlert.current_inr.desc()).all()
+
+    chargeback = defaultdict(float)
+    for row in db.query(CloudSpend.team, CloudSpend.amount_inr).all():
+        chargeback[row.team] += row.amount_inr
+    for row in db.query(KubernetesCost.team, KubernetesCost.amount_inr).all():
+        chargeback[row.team] += row.amount_inr
+    for row in db.query(AiUsage.product, AiUsage.amount_inr).all():
+        chargeback[row.product] += row.amount_inr
+
+    return {
+        "metrics": {
+            "total_spend_inr": cloud_total + kube_total + ai_total,
+            "cloud_spend_inr": cloud_total,
+            "kubernetes_spend_inr": kube_total,
+            "ai_spend_inr": ai_total,
+            "invoice_total_inr": invoice_total,
+            "forecast_total_inr": forecast_total,
+            "tokens": tokens,
+            "requests": requests,
+            "gpu_hours": round(gpu_seconds / 3600, 1),
+            "active_customers": len(customers),
+        },
+        "customers": [
+            {"id": c.id, "name": c.name, "segment": c.segment, "region": c.region, "billing_model": c.billing_model, "status": c.status}
+            for c in customers
+        ],
+        "cloudProviders": [{"name": row[0], "amount": money(row[1])} for row in provider_rows],
+        "aiProviders": [{"name": row[0], "amount": money(row[1]), "tokens": money(row[2]), "requests": money(row[3])} for row in ai_rows],
+        "teamChargeback": [{"team": team, "amount": money(amount)} for team, amount in sorted(chargeback.items(), key=lambda x: x[1], reverse=True)],
+        "kubernetes": [
+            {
+                "cluster": n.cluster,
+                "namespace": n.namespace,
+                "workload": n.workload,
+                "team": n.team,
+                "cpu": n.cpu_core_hours,
+                "memory": n.memory_gb_hours,
+                "gpu": n.gpu_hours,
+                "amount": money(n.amount_inr),
+            }
+            for n in namespaces
+        ],
+        "aiUsage": [
+            {
+                "provider": a.provider,
+                "model": a.model,
+                "product": a.product,
+                "tokens": a.tokens,
+                "requests": a.requests,
+                "gpuSeconds": a.gpu_seconds,
+                "storageGb": a.storage_gb,
+                "documents": a.documents,
+                "amount": money(a.amount_inr),
+            }
+            for a in ai_usage
+        ],
+        "invoices": [
+            {
+                "invoiceNo": i.invoice_no,
+                "customerId": i.customer_id,
+                "issueDate": i.issue_date.isoformat(),
+                "status": i.status,
+                "cloud": money(i.cloud_amount_inr),
+                "kubernetes": money(i.kubernetes_amount_inr),
+                "ai": money(i.ai_amount_inr),
+                "tax": money(i.tax_inr),
+                "total": money(i.total_inr),
+            }
+            for i in invoices
+        ],
+        "alerts": [
+            {
+                "scope": a.scope,
+                "owner": a.owner,
+                "threshold": money(a.threshold_inr),
+                "current": money(a.current_inr),
+                "severity": a.severity,
+                "message": a.message,
+            }
+            for a in alerts
+        ],
+        "recommendations": [
+            "Move steady GPU inference from on-demand cloud GPUs to reserved capacity for MedLM Labs.",
+            "Create namespace budgets for payments, risk-engine, tenant-alpha, and tenant-beta.",
+            "Bill AI products by blended token, request, document, storage, and GPU dimensions.",
+            "Use MSP invoice splits to pass through AWS, OCI, GCP, Kubernetes, and AI line items cleanly.",
+        ],
+        "teamCost": [{"team": row[0], "amount": money(row[1])} for row in team_rows],
+    }
