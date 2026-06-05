@@ -73,6 +73,13 @@ class ClusterCreateRequest(BaseModel):
     environment: str = "Production"
 
 
+class AgentHeartbeatRequest(BaseModel):
+    token: str
+    cluster_name: str
+    provider: str = "Kubernetes"
+    status: str = "connected"
+
+
 def cluster_install_command(cluster: ClusterConnection) -> str:
     return (
         "CLOUDMETER_TOKEN={token} CLOUDMETER_CLUSTER={cluster} "
@@ -432,10 +439,48 @@ def create_cluster(payload: ClusterCreateRequest, db: Session = Depends(get_db))
     }
 
 
+@app.post("/api/agent/heartbeat")
+def agent_heartbeat(payload: AgentHeartbeatRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
+    cluster = db.query(ClusterConnection).filter(ClusterConnection.token == payload.token).first()
+    if not cluster:
+        first_customer = db.query(Customer).order_by(Customer.id).first()
+        if not first_customer:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No customer available for cluster registration")
+        cluster = ClusterConnection(
+            customer_id=first_customer.id,
+            cluster_name=payload.cluster_name,
+            provider=payload.provider,
+            environment="Discovered",
+            token=payload.token,
+            status="connected",
+            last_seen=datetime.now(UTC).isoformat(),
+        )
+        db.add(cluster)
+    else:
+        cluster.cluster_name = payload.cluster_name or cluster.cluster_name
+        cluster.provider = payload.provider or cluster.provider
+        cluster.status = payload.status
+        cluster.last_seen = datetime.now(UTC).isoformat()
+    db.commit()
+    db.refresh(cluster)
+    return {
+        "status": "ok",
+        "cluster": {
+            "id": cluster.id,
+            "clusterName": cluster.cluster_name,
+            "provider": cluster.provider,
+            "connectionStatus": cluster.status,
+            "lastSeen": cluster.last_seen,
+        },
+    }
+
+
 @app.get("/api/agent/install.sh", response_class=PlainTextResponse)
 def agent_install_script() -> str:
     return """#!/usr/bin/env bash
 set -euo pipefail
+
+API_URL="${CLOUDMETER_API_URL:-https://cloudmeter.in}"
 
 if ! command -v kubectl >/dev/null 2>&1; then
   echo "kubectl is required before installing the CloudMeter agent."
@@ -446,6 +491,10 @@ if [ -z "${CLOUDMETER_TOKEN:-}" ] || [ -z "${CLOUDMETER_CLUSTER:-}" ]; then
   echo "CLOUDMETER_TOKEN and CLOUDMETER_CLUSTER are required."
   exit 1
 fi
+
+curl -fsSL -X POST "${API_URL}/api/agent/heartbeat" \
+  -H "Content-Type: application/json" \
+  -d "{\"token\":\"${CLOUDMETER_TOKEN}\",\"cluster_name\":\"${CLOUDMETER_CLUSTER}\",\"provider\":\"${CLOUDMETER_PROVIDER:-Kubernetes}\",\"status\":\"installing\"}" >/dev/null || true
 
 kubectl create namespace cloudmeter-agent --dry-run=client -o yaml | kubectl apply -f -
 kubectl create serviceaccount cloudmeter-agent -n cloudmeter-agent --dry-run=client -o yaml | kubectl apply -f -
@@ -491,13 +540,29 @@ spec:
       containers:
         - name: agent
           image: busybox:1.36
-          command: ["sh", "-c", "while true; do echo CloudMeter agent connected for ${CLOUDMETER_CLUSTER}; sleep 300; done"]
+          command:
+            - sh
+            - -c
+            - |
+              while true; do
+                wget -qO- --header='Content-Type: application/json' --post-data="{\\"token\\":\\"${CLOUDMETER_TOKEN}\\",\\"cluster_name\\":\\"${CLOUDMETER_CLUSTER}\\",\\"provider\\":\\"${CLOUDMETER_PROVIDER:-Kubernetes}\\",\\"status\\":\\"connected\\"}" "${API_URL}/api/agent/heartbeat" || true
+                echo "CloudMeter heartbeat sent for ${CLOUDMETER_CLUSTER}"
+                sleep 300
+              done
           env:
             - name: CLOUDMETER_TOKEN
               value: "${CLOUDMETER_TOKEN}"
             - name: CLOUDMETER_CLUSTER
               value: "${CLOUDMETER_CLUSTER}"
+            - name: CLOUDMETER_PROVIDER
+              value: "${CLOUDMETER_PROVIDER:-Kubernetes}"
+            - name: CLOUDMETER_API_URL
+              value: "${API_URL}"
 EOF
+
+curl -fsSL -X POST "${API_URL}/api/agent/heartbeat" \
+  -H "Content-Type: application/json" \
+  -d "{\"token\":\"${CLOUDMETER_TOKEN}\",\"cluster_name\":\"${CLOUDMETER_CLUSTER}\",\"provider\":\"${CLOUDMETER_PROVIDER:-Kubernetes}\",\"status\":\"connected\"}" >/dev/null || true
 
 echo "CloudMeter read-only agent installed for ${CLOUDMETER_CLUSTER}."
 echo "Verify with: kubectl get pods -n cloudmeter-agent"
