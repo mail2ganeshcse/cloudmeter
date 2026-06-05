@@ -13,6 +13,7 @@ import {
   Cloud,
   Copy,
   Cpu,
+  Database,
   FileText,
   Gauge,
   Github,
@@ -25,6 +26,7 @@ import {
   ShieldCheck,
   Sparkles,
   Terminal,
+  PlugZap,
   LogOut,
   Users,
   Eye,
@@ -49,7 +51,18 @@ type Dashboard = {
 };
 
 type Session = {
-  user: { name: string; email: string; avatar: string; username?: string; hasPassword?: boolean };
+  user: {
+    name: string;
+    email: string;
+    avatar: string;
+    username?: string;
+    hasPassword?: boolean;
+    firstName?: string;
+    lastName?: string;
+    countryCode?: string;
+    phoneNumber?: string;
+    onboardingComplete?: boolean;
+  };
   session: { role: string; plan: string };
   limits: Record<string, boolean | number>;
 };
@@ -372,6 +385,262 @@ function LoginGate({ onLogin }: { onLogin: (session: Session) => void }) {
   );
 }
 
+function SetupWizard({ session, onboarding, onUpdate }: { session: Session; onboarding: Onboarding | null; onUpdate: (session: Session) => void }) {
+  const [step, setStep] = useState(session.user.firstName && session.user.lastName ? 1 : 0);
+  const [firstName, setFirstName] = useState(session.user.firstName || session.user.name.split(" ")[0] || "");
+  const [lastName, setLastName] = useState(session.user.lastName || session.user.name.split(" ").slice(1).join(" ") || "");
+  const [countryCode, setCountryCode] = useState(session.user.countryCode || "+91");
+  const [phoneNumber, setPhoneNumber] = useState(session.user.phoneNumber || "");
+  const [clusterProvider, setClusterProvider] = useState("GKE");
+  const [clusterName, setClusterName] = useState("production-ai-cluster");
+  const [generatedCluster, setGeneratedCluster] = useState<Onboarding["clusters"][number] | null>(null);
+  const [cloudProvider, setCloudProvider] = useState("AWS");
+  const [dbProvider, setDbProvider] = useState("PostgreSQL");
+  const [copiedSetup, setCopiedSetup] = useState("");
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const existingCluster = generatedCluster ?? onboarding?.clusters?.[0] ?? null;
+  const steps = ["Profile", "Kubernetes", "Cloud", "Database"];
+  const clusterProviders = ["EKS", "GKE", "AKS", "OpenShift", "OKE", "Anywhere"];
+  const cloudProviders = [
+    { name: "AWS", detail: "CUR, Cost Explorer, EKS, S3, EC2 and GPU billing." },
+    { name: "GCP", detail: "BigQuery export, GKE, GPUs, storage and project labels." },
+    { name: "OCI", detail: "Usage reports, OKE, compute, object storage and tags." },
+    { name: "Azure", detail: "Cost Management exports, AKS, VMs and shared budgets." },
+  ];
+  const dbProviders = [
+    { name: "PostgreSQL", command: "curl -fsSL https://cloudmeter.in/api/db/install.sh | CLOUDMETER_DB=postgres bash" },
+    { name: "MySQL", command: "curl -fsSL https://cloudmeter.in/api/db/install.sh | CLOUDMETER_DB=mysql bash" },
+    { name: "MongoDB", command: "curl -fsSL https://cloudmeter.in/api/db/install.sh | CLOUDMETER_DB=mongodb bash" },
+    { name: "ClickHouse", command: "curl -fsSL https://cloudmeter.in/api/db/install.sh | CLOUDMETER_DB=clickhouse bash" },
+    { name: "Redis", command: "curl -fsSL https://cloudmeter.in/api/db/install.sh | CLOUDMETER_DB=redis bash" },
+    { name: "Oracle", command: "curl -fsSL https://cloudmeter.in/api/db/install.sh | CLOUDMETER_DB=oracle bash" },
+  ];
+  const selectedDb = dbProviders.find((provider) => provider.name === dbProvider) ?? dbProviders[0];
+
+  function saveProfile() {
+    setSaving(true);
+    setMessage("");
+    fetch(`${apiUrl}/api/auth/profile`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ first_name: firstName, last_name: lastName, country_code: countryCode, phone_number: phoneNumber }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ detail: "Could not save profile" }));
+          throw new Error(body.detail ?? "Could not save profile");
+        }
+        return res.json();
+      })
+      .then((updatedSession) => {
+        onUpdate(updatedSession);
+        setStep(1);
+      })
+      .catch((err: Error) => setMessage(err.message))
+      .finally(() => setSaving(false));
+  }
+
+  function generateClusterScript() {
+    setSaving(true);
+    setMessage("");
+    fetch(`${apiUrl}/api/onboarding/clusters`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ customer_id: 1, cluster_name: clusterName, provider: clusterProvider, environment: "Production" }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ detail: "Could not create cluster setup" }));
+          throw new Error(body.detail ?? "Could not create cluster setup");
+        }
+        return res.json();
+      })
+      .then((cluster) => {
+        setGeneratedCluster({ ...cluster, id: cluster.id, environment: "Production", agentMode: "read-only", lastSeen: "Waiting for agent" });
+        setMessage("Install script generated. Run it from a terminal with kubectl access.");
+      })
+      .catch((err: Error) => setMessage(err.message))
+      .finally(() => setSaving(false));
+  }
+
+  function copySetup(value: string, key: string) {
+    navigator.clipboard.writeText(value);
+    setCopiedSetup(key);
+    window.setTimeout(() => setCopiedSetup(""), 1800);
+  }
+
+  function completeSetup() {
+    setSaving(true);
+    setMessage("");
+    fetch(`${apiUrl}/api/auth/onboarding/complete`, { method: "POST", credentials: "include" })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ detail: "Could not finish setup" }));
+          throw new Error(body.detail ?? "Could not finish setup");
+        }
+        return res.json();
+      })
+      .then(onUpdate)
+      .catch((err: Error) => setMessage(err.message))
+      .finally(() => setSaving(false));
+  }
+
+  return (
+    <main className="setup-shell">
+      <section className="setup-frame">
+        <aside className="setup-side">
+          <div className="brand setup-brand">
+            <span><IndianRupee size={24} /></span>
+            <div>
+              <strong>CloudMeter AI</strong>
+              <small>Workspace setup</small>
+            </div>
+          </div>
+          {steps.map((item, index) => (
+            <button key={item} className={step === index ? "active" : index < step ? "done" : ""} onClick={() => setStep(index)}>
+              <span>{index < step ? <CheckCircle2 size={16} /> : index + 1}</span>
+              {item}
+            </button>
+          ))}
+          <div className="setup-side-card">
+            <ShieldCheck size={20} />
+            <strong>Read-only by default</strong>
+            <p>Kubernetes, cloud and DB connectors are designed for billing visibility without write access.</p>
+          </div>
+        </aside>
+
+        <section className="setup-main">
+          <header className="setup-top">
+            <div>
+              <span className="eyebrow">Let's get started</span>
+              <h1>{step === 0 ? "We need a few details to set up your account." : `Welcome, ${firstName || session.user.name}! Get started in 4 simple steps`}</h1>
+            </div>
+            <div className="setup-user">
+              {session.user.avatar ? <img src={session.user.avatar} alt="" /> : <span>{session.user.email.slice(0, 2).toUpperCase()}</span>}
+              <small>{session.user.email}</small>
+            </div>
+          </header>
+
+          {step === 0 && (
+            <section className="profile-card">
+              <div className="profile-visual">
+                <Sparkles size={22} />
+                <strong>Personalize your CloudMeter workspace</strong>
+                <p>Your name appears on reports, cluster invitations, approval trails and billing handoffs.</p>
+              </div>
+              <div className="profile-form">
+                <label>First name</label>
+                <input value={firstName} onChange={(event) => setFirstName(event.target.value)} placeholder="John" />
+                <label>Last name</label>
+                <input value={lastName} onChange={(event) => setLastName(event.target.value)} placeholder="Smith" />
+                <label>Phone number <span>(optional)</span></label>
+                <div className="phone-row">
+                  <input value={countryCode} onChange={(event) => setCountryCode(event.target.value)} placeholder="+00" />
+                  <input value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder="000 000 000" />
+                </div>
+                <button className="setup-primary" onClick={saveProfile} disabled={saving}>{saving ? "Saving..." : "Continue setup"}</button>
+              </div>
+            </section>
+          )}
+
+          {step === 1 && (
+            <section className="connect-view">
+              <div className="connect-head">
+                <div><span className="step-dot">1</span><h2>Connect your Kubernetes cluster</h2><p>Select provider, generate script, then run it from your terminal.</p></div>
+                <button className="ghost-button"><Terminal size={16} /> Terraform</button>
+              </div>
+              <div className="provider-options">
+                {clusterProviders.map((provider) => (
+                  <button key={provider} className={clusterProvider === provider ? "selected" : ""} onClick={() => setClusterProvider(provider)}>
+                    <span /> <Boxes size={20} /> {provider}
+                    {provider === "Anywhere" && <small>Cloud or On-Prem</small>}
+                  </button>
+                ))}
+              </div>
+              <div className="script-panel">
+                <label>Cluster name</label>
+                <input value={clusterName} onChange={(event) => setClusterName(event.target.value)} />
+                <button className="setup-primary" onClick={generateClusterScript} disabled={saving}>{saving ? "Generating..." : "Generate script"}</button>
+                {existingCluster && (
+                  <>
+                    <code>{existingCluster.installCommand}</code>
+                    <div className="cluster-actions">
+                      <button onClick={() => copySetup(existingCluster.installCommand, "cluster")}>{copiedSetup === "cluster" ? "Copied" : "Copy install command"}</button>
+                      <button onClick={() => copySetup(existingCluster.verifyCommand, "verify")}>{copiedSetup === "verify" ? "Copied" : "Copy verify command"}</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </section>
+          )}
+
+          {step === 2 && (
+            <section className="connect-view">
+              <div className="connect-head">
+                <div><span className="step-dot">2</span><h2>Connect cloud billing</h2><p>Bring cost exports, labels, projects and accounts into one chargeback ledger.</p></div>
+                <button className="ghost-button"><Cloud size={16} /> Secure read-only access</button>
+              </div>
+              <div className="cloud-grid">
+                {cloudProviders.map((provider) => (
+                  <button key={provider.name} className={cloudProvider === provider.name ? "selected" : ""} onClick={() => setCloudProvider(provider.name)}>
+                    <Cloud size={24} />
+                    <strong>{provider.name}</strong>
+                    <span>{provider.detail}</span>
+                    <em>{cloudProvider === provider.name ? "Selected" : "Connect"}</em>
+                  </button>
+                ))}
+              </div>
+              <article className="permission-card">
+                <PlugZap size={20} />
+                <div><strong>{cloudProvider} setup package</strong><span>Creates least-privilege billing import, tag sync, anomaly detection and daily forecast jobs.</span></div>
+              </article>
+            </section>
+          )}
+
+          {step === 3 && (
+            <section className="connect-view">
+              <div className="connect-head">
+                <div><span className="step-dot">3</span><h2>Connect database clusters</h2><p>Track database CPU, memory, storage, replicas, backup cost and customer chargeback.</p></div>
+                <button className="ghost-button"><Database size={16} /> Agentless or agent mode</button>
+              </div>
+              <div className="db-grid">
+                {dbProviders.map((provider) => (
+                  <button key={provider.name} className={dbProvider === provider.name ? "selected" : ""} onClick={() => setDbProvider(provider.name)}>
+                    <Database size={22} />
+                    <strong>{provider.name}</strong>
+                    <span>Query insights, storage trends, backup cost and forecast alerts.</span>
+                  </button>
+                ))}
+              </div>
+              <div className="script-panel">
+                <strong>{selectedDb.name} collector command</strong>
+                <code>{selectedDb.command}</code>
+                <div className="cluster-actions">
+                  <button onClick={() => copySetup(selectedDb.command, "db")}>{copiedSetup === "db" ? "Copied" : "Copy DB command"}</button>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {message && <p className="setup-message">{message}</p>}
+          <footer className="setup-footer">
+            <button className="ghost-button" onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0}>Back</button>
+            {step < 3 ? (
+              <button className="setup-primary" onClick={() => (step === 0 ? saveProfile() : setStep(step + 1))} disabled={saving}>{step === 0 ? "Save and continue" : "Next"}</button>
+            ) : (
+              <button className="setup-primary" onClick={completeSetup} disabled={saving}>{saving ? "Finishing..." : "Open dashboard"}</button>
+            )}
+          </footer>
+        </section>
+      </section>
+    </main>
+  );
+}
+
 function App() {
   const [data, setData] = useState<Dashboard>(fallback);
   const [session, setSession] = useState<Session | null>(null);
@@ -478,6 +747,10 @@ function App() {
 
   if (!session) {
     return <LoginGate onLogin={setSession} />;
+  }
+
+  if (!session.user.onboardingComplete) {
+    return <SetupWizard session={session} onboarding={onboarding} onUpdate={setSession} />;
   }
 
   return (

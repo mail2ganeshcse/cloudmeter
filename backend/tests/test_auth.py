@@ -189,3 +189,27 @@ def test_authenticated_user_can_set_local_password(client, monkeypatch):
 
     login = client.post("/api/auth/login", json={"username": "setpass@gmail.com", "password": "cloudmeter123"})
     assert login.status_code == 200
+
+
+def test_authenticated_user_can_save_profile_and_complete_onboarding(client, db_session, monkeypatch):
+    monkeypatch.setattr("app.main.id_token.verify_oauth2_token", lambda *args: google_claims(email="profile@gmail.com"))
+    google = client.post("/api/auth/google", json={"credential": "header.payload.signature"})
+    assert google.status_code == 200
+    assert google.json()["user"]["onboardingComplete"] is False
+
+    profile = client.post(
+        "/api/auth/profile",
+        json={"first_name": "John", "last_name": "Smith", "country_code": "+91", "phone_number": "9876543210"},
+    )
+    assert profile.status_code == 200
+    assert profile.json()["user"]["firstName"] == "John"
+    assert profile.json()["user"]["lastName"] == "Smith"
+    assert profile.json()["user"]["phoneNumber"] == "9876543210"
+
+    complete = client.post("/api/auth/onboarding/complete")
+    assert complete.status_code == 200
+    assert complete.json()["user"]["onboardingComplete"] is True
+
+    account = db_session.query(UserAccount).filter(UserAccount.email == "profile@gmail.com").first()
+    assert account.name == "John Smith"
+    assert account.onboarding_complete is True

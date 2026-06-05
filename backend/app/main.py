@@ -70,6 +70,13 @@ class SetPasswordRequest(BaseModel):
     password: str
 
 
+class ProfileSetupRequest(BaseModel):
+    first_name: str
+    last_name: str
+    country_code: str = "+91"
+    phone_number: str = ""
+
+
 class ClusterCreateRequest(BaseModel):
     customer_id: int
     cluster_name: str
@@ -110,6 +117,11 @@ def ensure_user_account_columns() -> None:
         "username": "ALTER TABLE user_accounts ADD COLUMN username VARCHAR(180) DEFAULT ''",
         "password_salt": "ALTER TABLE user_accounts ADD COLUMN password_salt VARCHAR(80) DEFAULT ''",
         "password_hash": "ALTER TABLE user_accounts ADD COLUMN password_hash VARCHAR(160) DEFAULT ''",
+        "first_name": "ALTER TABLE user_accounts ADD COLUMN first_name VARCHAR(80) DEFAULT ''",
+        "last_name": "ALTER TABLE user_accounts ADD COLUMN last_name VARCHAR(80) DEFAULT ''",
+        "country_code": "ALTER TABLE user_accounts ADD COLUMN country_code VARCHAR(12) DEFAULT '+91'",
+        "phone_number": "ALTER TABLE user_accounts ADD COLUMN phone_number VARCHAR(40) DEFAULT ''",
+        "onboarding_complete": "ALTER TABLE user_accounts ADD COLUMN onboarding_complete BOOLEAN DEFAULT FALSE",
     }
     with engine.begin() as connection:
         for column, statement in ddl.items():
@@ -173,6 +185,11 @@ def session_payload(user: UserAccount, session_token: str | None = None) -> dict
             "avatar": user.avatar,
             "username": user.username or user.email,
             "hasPassword": bool(user.password_hash),
+            "firstName": user.first_name,
+            "lastName": user.last_name,
+            "countryCode": user.country_code,
+            "phoneNumber": user.phone_number,
+            "onboardingComplete": user.onboarding_complete,
         },
         "limits": limits_for_role(user.role),
     }
@@ -362,6 +379,39 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)) 
 def set_password(payload: SetPasswordRequest, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
     user, _ = current_user_from_cookie(request, db)
     set_local_password(user, user.email, payload.password)
+    db.commit()
+    db.refresh(user)
+    return session_payload(user)
+
+
+@app.post("/api/auth/profile")
+def set_profile(payload: ProfileSetupRequest, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user, _ = current_user_from_cookie(request, db)
+    first_name = payload.first_name.strip()
+    last_name = payload.last_name.strip()
+    country_code = payload.country_code.strip() or "+91"
+    phone_number = payload.phone_number.strip()
+    if len(first_name) < 2:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="First name is required")
+    if len(last_name) < 1:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Last name is required")
+    if not country_code.startswith("+") or len(country_code) > 12:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Use a valid country code")
+
+    user.first_name = first_name
+    user.last_name = last_name
+    user.country_code = country_code
+    user.phone_number = phone_number
+    user.name = f"{first_name} {last_name}".strip()
+    db.commit()
+    db.refresh(user)
+    return session_payload(user)
+
+
+@app.post("/api/auth/onboarding/complete")
+def complete_onboarding(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user, _ = current_user_from_cookie(request, db)
+    user.onboarding_complete = True
     db.commit()
     db.refresh(user)
     return session_payload(user)
