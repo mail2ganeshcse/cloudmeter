@@ -296,6 +296,10 @@ def test_agent_install_script_uses_valid_shell_json(client):
     assert "/api/agent/snapshot" in script
     assert 'NETWORK_AGENT_NAME="cloudmeter-network-agent-${CLUSTER_SLUG}"' in script
     assert "__NETWORK_AGENT_NAME__" in script
+    assert 'resources: ["nodes/proxy"]' in script
+    assert "/proxy/stats/summary" in script
+    assert "kubelet-summary" in script
+    assert "kubectl rollout status -n cloudmeter-agent" in script
     assert "/api/agent/network" in script
     assert "CLOUDMETER_PROMETHEUS_URL" in script
 

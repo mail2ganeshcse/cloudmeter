@@ -942,6 +942,9 @@ rules:
   - apiGroups: ["metrics.k8s.io"]
     resources: ["pods", "nodes"]
     verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["nodes/proxy"]
+    verbs: ["get"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
     verbs: ["get", "list", "watch"]
@@ -1148,6 +1151,17 @@ spec:
                     pod_to_ns[name] = namespace
                 return counts, pod_to_ns
 
+              def cluster_nodes():
+                with open(service_token_path, "r", encoding="utf-8") as handle:
+                  bearer = handle.read().strip()
+                headers = {"Authorization": f"Bearer {bearer}"}
+                body = http_json(f"{kube_host}/api/v1/nodes", headers=headers)
+                return [
+                  item.get("metadata", {}).get("name")
+                  for item in body.get("items", [])
+                  if item.get("metadata", {}).get("name")
+                ]
+
               def prometheus_urls():
                 configured = os.environ.get("CLOUDMETER_PROMETHEUS_URL", "").strip()
                 urls = [configured] if configured else []
@@ -1171,6 +1185,45 @@ spec:
                   return []
                 return body.get("data", {}).get("result", [])
 
+              previous_network = {}
+              previous_observed_at = None
+
+              def collect_kubelet_summary(metrics):
+                global previous_observed_at
+                now = time.time()
+                elapsed = max(now - previous_observed_at, 1) if previous_observed_at else 0
+                current = {}
+                with open(service_token_path, "r", encoding="utf-8") as handle:
+                  bearer = handle.read().strip()
+                headers = {"Authorization": f"Bearer {bearer}"}
+                for node in cluster_nodes():
+                  try:
+                    summary = http_json(f"{kube_host}/api/v1/nodes/{urllib.parse.quote(node, safe='')}/proxy/stats/summary", headers=headers)
+                  except Exception as exc:
+                    print(f"Kubelet summary scrape failed for {node}: {exc}", flush=True)
+                    continue
+                  for pod in summary.get("pods", []):
+                    pod_ref = pod.get("podRef", {})
+                    namespace = pod_ref.get("namespace")
+                    name = pod_ref.get("name")
+                    network = pod.get("network") or {}
+                    if not namespace or not name:
+                      continue
+                    key = f"{namespace}/{name}"
+                    rx = float(network.get("rxBytes") or 0)
+                    tx = float(network.get("txBytes") or 0)
+                    current[key] = (namespace, rx, tx)
+                    row = metrics.setdefault(namespace, {"namespace": namespace, "workload": "namespace", "rx_bytes_per_sec": 0, "tx_bytes_per_sec": 0, "connections": 0, "source": "kubelet-summary"})
+                    if elapsed and key in previous_network:
+                      _, old_rx, old_tx = previous_network[key]
+                      row["rx_bytes_per_sec"] += max(rx - old_rx, 0) / elapsed
+                      row["tx_bytes_per_sec"] += max(tx - old_tx, 0) / elapsed
+                    row["source"] = "kubelet-summary"
+                previous_network.clear()
+                previous_network.update(current)
+                previous_observed_at = now
+                return metrics
+
               def collect_network():
                 namespace_counts, pod_to_ns = pod_inventory()
                 metrics = {
@@ -1184,6 +1237,7 @@ spec:
                   }
                   for namespace, count in namespace_counts.items()
                 }
+                metrics = collect_kubelet_summary(metrics)
                 for base in prometheus_urls():
                   try:
                     rx_rows = query_prometheus(base, 'sum by (namespace) (rate(container_network_receive_bytes_total[5m]))')
@@ -1233,6 +1287,10 @@ spec:
               value: "__PROMETHEUS_URL__"
 EOF
 
+echo "Waiting for CloudMeter network collector..."
+kubectl rollout status -n cloudmeter-agent "deployment/${NETWORK_AGENT_NAME}" --timeout=90s || true
+kubectl get pods -n cloudmeter-agent -l app.kubernetes.io/name=cloudmeter-network-agent,app.kubernetes.io/instance="${CLUSTER_SLUG}" || true
+
 curl -fsSL -X POST "${API_URL}/api/agent/heartbeat" \
   -H "Content-Type: application/json" \
   -d '{"token":"'"${CLOUDMETER_TOKEN}"'","cluster_name":"'"${CLOUDMETER_CLUSTER}"'","provider":"'"${CLOUDMETER_PROVIDER:-Kubernetes}"'","status":"connected"}' >/dev/null || true
@@ -1241,7 +1299,8 @@ echo "Waiting for first CloudMeter metrics snapshot..."
 kubectl logs -n cloudmeter-agent "deployment/${AGENT_NAME}" --tail=5 --request-timeout=10s 2>/dev/null || true
 
 echo "CloudMeter read-only agent installed for ${CLOUDMETER_CLUSTER}."
-echo "Verify with: kubectl get pods -n cloudmeter-agent -l app.kubernetes.io/instance=${CLUSTER_SLUG}"
+echo "Metrics agent: kubectl get pods -n cloudmeter-agent -l app.kubernetes.io/name=cloudmeter-agent,app.kubernetes.io/instance=${CLUSTER_SLUG}"
+echo "Network agent: kubectl get pods -n cloudmeter-agent -l app.kubernetes.io/name=cloudmeter-network-agent,app.kubernetes.io/instance=${CLUSTER_SLUG}"
 """
 
 
