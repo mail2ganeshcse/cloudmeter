@@ -3,13 +3,14 @@ from datetime import UTC, datetime, timedelta
 from hashlib import pbkdf2_hmac, sha256
 from secrets import token_hex, token_urlsafe
 from typing import Any
+from urllib.parse import urlencode
 
 import certifi
 import requests
 from google.auth.exceptions import GoogleAuthError, TransportError
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from sqlalchemy import inspect, text, func
@@ -115,6 +116,8 @@ def ensure_user_account_columns() -> None:
     existing = {column["name"] for column in inspector.get_columns("user_accounts")}
     ddl = {
         "username": "ALTER TABLE user_accounts ADD COLUMN username VARCHAR(180) DEFAULT ''",
+        "github_sub": "ALTER TABLE user_accounts ADD COLUMN github_sub VARCHAR(120) DEFAULT ''",
+        "sso_sub": "ALTER TABLE user_accounts ADD COLUMN sso_sub VARCHAR(180) DEFAULT ''",
         "password_salt": "ALTER TABLE user_accounts ADD COLUMN password_salt VARCHAR(80) DEFAULT ''",
         "password_hash": "ALTER TABLE user_accounts ADD COLUMN password_hash VARCHAR(160) DEFAULT ''",
         "first_name": "ALTER TABLE user_accounts ADD COLUMN first_name VARCHAR(80) DEFAULT ''",
@@ -171,10 +174,31 @@ def limits_for_role(role: str) -> dict[str, bool | int]:
     }
 
 
+def create_session_for_user(user: UserAccount, response: Response, db: Session) -> tuple[str, datetime]:
+    now = datetime.now(UTC)
+    user.last_login_at = now
+    session_token = token_urlsafe(32)
+    expires_at = now + timedelta(days=settings.session_ttl_days)
+    db.flush()
+    db.add(
+        UserSession(
+            user_id=user.id,
+            token_hash=token_hash(session_token),
+            created_at=now,
+            expires_at=expires_at,
+            revoked=False,
+        )
+    )
+    db.commit()
+    db.refresh(user)
+    set_session_cookie(response, session_token, expires_at)
+    return session_token, expires_at
+
+
 def session_payload(user: UserAccount, session_token: str | None = None) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "session": {
-            "provider": "google",
+            "provider": user.provider,
             "role": user.role,
             "plan": "limited" if user.role == "viewer" else "master" if user.role == "superadmin" else "workspace",
         },
@@ -196,6 +220,66 @@ def session_payload(user: UserAccount, session_token: str | None = None) -> dict
     if session_token:
         payload["session"]["accessToken"] = session_token
     return payload
+
+
+def upsert_oauth_user(
+    db: Session,
+    *,
+    provider: str,
+    subject: str,
+    email: str,
+    name: str,
+    avatar: str = "",
+    hosted_domain: str = "",
+) -> UserAccount:
+    normalized_email = email.strip().lower()
+    if not subject or not normalized_email or "@" not in normalized_email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="OAuth provider did not return a usable identity")
+
+    subject_column = {
+        "google": UserAccount.google_sub,
+        "github": UserAccount.github_sub,
+        "sso": UserAccount.sso_sub,
+    }[provider]
+    user = db.query(UserAccount).filter(subject_column == subject).first()
+    if not user:
+        user = db.query(UserAccount).filter(UserAccount.email == normalized_email).first()
+
+    now = datetime.now(UTC)
+    role = role_for_email(normalized_email)
+    if not user:
+        user = UserAccount(
+            google_sub=subject if provider == "google" else f"{provider}:{subject}",
+            github_sub=subject if provider == "github" else "",
+            sso_sub=subject if provider == "sso" else "",
+            email=normalized_email,
+            username=normalized_email,
+            name=name or normalized_email.split("@")[0],
+            avatar=avatar,
+            role=role,
+            provider=provider,
+            hosted_domain=hosted_domain,
+            first_login_at=now,
+            last_login_at=now,
+        )
+        db.add(user)
+        return user
+
+    if provider == "google":
+        user.google_sub = subject
+    elif provider == "github":
+        user.github_sub = subject
+    elif provider == "sso":
+        user.sso_sub = subject
+    user.email = normalized_email
+    user.username = user.username or normalized_email
+    user.name = name or user.name
+    user.avatar = avatar or user.avatar
+    user.role = role
+    user.provider = provider
+    user.hosted_domain = hosted_domain
+    user.last_login_at = now
+    return user
 
 
 def set_session_cookie(response: Response, session_token: str, expires_at: datetime) -> None:
@@ -282,55 +366,158 @@ def google_login(payload: GoogleLoginRequest, response: Response, db: Session = 
     if not claims.get("email_verified"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google email is not verified")
 
-    now = datetime.now(UTC)
-    role = role_for_email(email)
-    user = db.query(UserAccount).filter(UserAccount.google_sub == google_sub).first()
-    if not user:
-        user = UserAccount(
-            google_sub=google_sub,
-            email=email,
-            username=(payload.username or email).strip().lower(),
-            name=str(claims.get("name") or email.split("@")[0]),
-            avatar=str(claims.get("picture") or ""),
-            role=role,
-            provider="google",
-            hosted_domain=str(claims.get("hd") or ""),
-            first_login_at=now,
-            last_login_at=now,
-        )
-        db.add(user)
-    else:
-        user.email = email
-        if not user.username:
-            user.username = (payload.username or email).strip().lower()
-        user.name = str(claims.get("name") or user.name)
-        user.avatar = str(claims.get("picture") or user.avatar)
-        user.role = role
-        user.hosted_domain = str(claims.get("hd") or "")
-        user.last_login_at = now
+    user = upsert_oauth_user(
+        db,
+        provider="google",
+        subject=google_sub,
+        email=email,
+        name=str(claims.get("name") or email.split("@")[0]),
+        avatar=str(claims.get("picture") or ""),
+        hosted_domain=str(claims.get("hd") or ""),
+    )
 
     if payload.username and payload.password:
         if payload.username.strip().lower() != email:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username must match the verified Google email")
         set_local_password(user, payload.username, payload.password)
 
-    session_token = token_urlsafe(32)
-    expires_at = now + timedelta(days=settings.session_ttl_days)
-    db.flush()
-    db.add(
-        UserSession(
-            user_id=user.id,
-            token_hash=token_hash(session_token),
-            created_at=now,
-            expires_at=expires_at,
-            revoked=False,
-        )
-    )
-    db.commit()
-    db.refresh(user)
-    set_session_cookie(response, session_token, expires_at)
-
+    session_token, _ = create_session_for_user(user, response, db)
     return session_payload(user, session_token)
+
+
+@app.get("/api/auth/github/start")
+def github_start() -> RedirectResponse:
+    if not settings.github_client_id or not settings.github_client_secret:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="GitHub OAuth is not configured")
+    state = token_urlsafe(24)
+    redirect_uri = f"{settings.public_api_url.rstrip('/')}/api/auth/github/callback"
+    url = "https://github.com/login/oauth/authorize?" + urlencode(
+        {
+            "client_id": settings.github_client_id,
+            "redirect_uri": redirect_uri,
+            "scope": "read:user user:email",
+            "state": state,
+        }
+    )
+    response = RedirectResponse(url)
+    response.set_cookie("cloudmeter_github_state", state, httponly=True, secure=settings.session_cookie_secure, samesite="lax", max_age=600, path="/")
+    return response
+
+
+@app.get("/api/auth/github/callback")
+def github_callback(code: str, state: str, request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
+    expected_state = request.cookies.get("cloudmeter_github_state")
+    if not expected_state or expected_state != state:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid GitHub OAuth state")
+
+    token_response = requests.post(
+        "https://github.com/login/oauth/access_token",
+        headers={"Accept": "application/json"},
+        data={
+            "client_id": settings.github_client_id,
+            "client_secret": settings.github_client_secret,
+            "code": code,
+            "redirect_uri": f"{settings.public_api_url.rstrip('/')}/api/auth/github/callback",
+        },
+        timeout=15,
+    )
+    token_response.raise_for_status()
+    access_token = token_response.json().get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="GitHub OAuth did not return an access token")
+
+    headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.github+json"}
+    profile = requests.get("https://api.github.com/user", headers=headers, timeout=15)
+    profile.raise_for_status()
+    profile_body = profile.json()
+    emails = requests.get("https://api.github.com/user/emails", headers=headers, timeout=15)
+    emails.raise_for_status()
+    email_rows = emails.json()
+    primary_email = next((row["email"] for row in email_rows if row.get("primary") and row.get("verified")), "")
+    if not primary_email:
+        primary_email = next((row["email"] for row in email_rows if row.get("verified")), "")
+    if not primary_email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="GitHub account needs a verified email")
+
+    user = upsert_oauth_user(
+        db,
+        provider="github",
+        subject=str(profile_body.get("id") or ""),
+        email=primary_email,
+        name=str(profile_body.get("name") or profile_body.get("login") or primary_email.split("@")[0]),
+        avatar=str(profile_body.get("avatar_url") or ""),
+    )
+    response = RedirectResponse(settings.frontend_url.rstrip("/"))
+    create_session_for_user(user, response, db)
+    response.delete_cookie("cloudmeter_github_state", path="/")
+    return response
+
+
+@app.get("/api/auth/sso/start")
+def sso_start() -> RedirectResponse:
+    if not all([settings.sso_client_id, settings.sso_client_secret, settings.sso_authorize_url, settings.sso_token_url, settings.sso_userinfo_url]):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="SSO OIDC is not configured")
+    state = token_urlsafe(24)
+    redirect_uri = f"{settings.public_api_url.rstrip('/')}/api/auth/sso/callback"
+    url = settings.sso_authorize_url + ("&" if "?" in settings.sso_authorize_url else "?") + urlencode(
+        {
+            "client_id": settings.sso_client_id,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": "openid email profile",
+            "state": state,
+        }
+    )
+    response = RedirectResponse(url)
+    response.set_cookie("cloudmeter_sso_state", state, httponly=True, secure=settings.session_cookie_secure, samesite="lax", max_age=600, path="/")
+    return response
+
+
+@app.get("/api/auth/sso/callback")
+def sso_callback(code: str, state: str, request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
+    expected_state = request.cookies.get("cloudmeter_sso_state")
+    if not expected_state or expected_state != state:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid SSO state")
+
+    token_response = requests.post(
+        settings.sso_token_url,
+        data={
+            "grant_type": "authorization_code",
+            "client_id": settings.sso_client_id,
+            "client_secret": settings.sso_client_secret,
+            "code": code,
+            "redirect_uri": f"{settings.public_api_url.rstrip('/')}/api/auth/sso/callback",
+        },
+        timeout=15,
+    )
+    token_response.raise_for_status()
+    access_token = token_response.json().get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="SSO did not return an access token")
+
+    profile = requests.get(settings.sso_userinfo_url, headers={"Authorization": f"Bearer {access_token}"}, timeout=15)
+    profile.raise_for_status()
+    claims = profile.json()
+    email = str(claims.get("email") or "").lower()
+    subject = str(claims.get("sub") or "")
+    if not email or not subject:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="SSO profile is missing email or subject")
+    if claims.get("email_verified") is False:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="SSO email is not verified")
+
+    user = upsert_oauth_user(
+        db,
+        provider="sso",
+        subject=subject,
+        email=email,
+        name=str(claims.get("name") or email.split("@")[0]),
+        avatar=str(claims.get("picture") or ""),
+        hosted_domain=email.split("@")[-1],
+    )
+    response = RedirectResponse(settings.frontend_url.rstrip("/"))
+    create_session_for_user(user, response, db)
+    response.delete_cookie("cloudmeter_sso_state", path="/")
+    return response
 
 
 @app.post("/api/auth/login")
@@ -340,22 +527,7 @@ def password_login(payload: PasswordLoginRequest, response: Response, db: Sessio
     if not user or not password_matches(user, payload.password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
 
-    now = datetime.now(UTC)
-    user.last_login_at = now
-    session_token = token_urlsafe(32)
-    expires_at = now + timedelta(days=settings.session_ttl_days)
-    db.add(
-        UserSession(
-            user_id=user.id,
-            token_hash=token_hash(session_token),
-            created_at=now,
-            expires_at=expires_at,
-            revoked=False,
-        )
-    )
-    db.commit()
-    db.refresh(user)
-    set_session_cookie(response, session_token, expires_at)
+    session_token, _ = create_session_for_user(user, response, db)
     return session_payload(user, session_token)
 
 

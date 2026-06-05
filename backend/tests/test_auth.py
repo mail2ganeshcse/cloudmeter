@@ -213,3 +213,67 @@ def test_authenticated_user_can_save_profile_and_complete_onboarding(client, db_
     account = db_session.query(UserAccount).filter(UserAccount.email == "profile@gmail.com").first()
     assert account.name == "John Smith"
     assert account.onboarding_complete is True
+
+
+class FakeOAuthResponse:
+    def __init__(self, body):
+        self.body = body
+
+    def json(self):
+        return self.body
+
+    def raise_for_status(self):
+        return None
+
+
+def test_github_oauth_callback_creates_session(client, db_session, monkeypatch):
+    monkeypatch.setattr(settings, "github_client_id", "github-client")
+    monkeypatch.setattr(settings, "github_client_secret", "github-secret")
+    monkeypatch.setattr(settings, "public_api_url", "https://cloudmeter.test")
+    monkeypatch.setattr(settings, "frontend_url", "https://app.cloudmeter.test")
+
+    def fake_post(*args, **kwargs):
+        return FakeOAuthResponse({"access_token": "gh-token"})
+
+    def fake_get(url, *args, **kwargs):
+        if url.endswith("/user"):
+            return FakeOAuthResponse({"id": 42, "login": "octo", "name": "Octo User", "avatar_url": "https://example.com/octo.png"})
+        return FakeOAuthResponse([{"email": "octo@example.com", "primary": True, "verified": True}])
+
+    monkeypatch.setattr("app.main.requests.post", fake_post)
+    monkeypatch.setattr("app.main.requests.get", fake_get)
+
+    client.cookies.set("cloudmeter_github_state", "state-1")
+    response = client.get("/api/auth/github/callback?code=abc&state=state-1", follow_redirects=False)
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "https://app.cloudmeter.test"
+    assert response.cookies.get(settings.session_cookie_name)
+    account = db_session.query(UserAccount).filter(UserAccount.email == "octo@example.com").first()
+    assert account.provider == "github"
+    assert account.github_sub == "42"
+
+
+def test_sso_oauth_callback_creates_session(client, db_session, monkeypatch):
+    monkeypatch.setattr(settings, "sso_client_id", "sso-client")
+    monkeypatch.setattr(settings, "sso_client_secret", "sso-secret")
+    monkeypatch.setattr(settings, "sso_token_url", "https://idp.example.com/token")
+    monkeypatch.setattr(settings, "sso_userinfo_url", "https://idp.example.com/userinfo")
+    monkeypatch.setattr(settings, "public_api_url", "https://cloudmeter.test")
+    monkeypatch.setattr(settings, "frontend_url", "https://app.cloudmeter.test")
+
+    monkeypatch.setattr("app.main.requests.post", lambda *args, **kwargs: FakeOAuthResponse({"access_token": "sso-token"}))
+    monkeypatch.setattr(
+        "app.main.requests.get",
+        lambda *args, **kwargs: FakeOAuthResponse({"sub": "sso-sub-1", "email": "sso@example.com", "email_verified": True, "name": "SSO User"}),
+    )
+
+    client.cookies.set("cloudmeter_sso_state", "state-2")
+    response = client.get("/api/auth/sso/callback?code=abc&state=state-2", follow_redirects=False)
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "https://app.cloudmeter.test"
+    assert response.cookies.get(settings.session_cookie_name)
+    account = db_session.query(UserAccount).filter(UserAccount.email == "sso@example.com").first()
+    assert account.provider == "sso"
+    assert account.sso_sub == "sso-sub-1"

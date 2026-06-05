@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
@@ -84,6 +84,7 @@ declare global {
             auto_select?: boolean;
             cancel_on_tap_outside?: boolean;
           }) => void;
+          renderButton: (parent: HTMLElement, options: Record<string, unknown>) => void;
           prompt: (momentListener?: (notification: { isNotDisplayed: () => boolean; isSkippedMoment: () => boolean; getNotDisplayedReason: () => string; getSkippedReason: () => string }) => void) => void;
           cancel: () => void;
         };
@@ -194,6 +195,7 @@ function LoginGate({ onLogin }: { onLogin: (session: Session) => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const googleButtonRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!googleClientId) {
@@ -201,12 +203,7 @@ function LoginGate({ onLogin }: { onLogin: (session: Session) => void }) {
       return;
     }
 
-    const existing = document.querySelector<HTMLScriptElement>('script[src="https://accounts.google.com/gsi/client"]');
-    const script = existing ?? document.createElement("script");
-    script.src = "https://accounts.google.com/gsi/client";
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
+    function initializeGoogle() {
       window.google?.accounts.id.initialize({
         client_id: googleClientId,
         ux_mode: "popup",
@@ -237,70 +234,39 @@ function LoginGate({ onLogin }: { onLogin: (session: Session) => void }) {
             .finally(() => setLoading(false));
         },
       });
+      if (googleButtonRef.current) {
+        googleButtonRef.current.innerHTML = "";
+        window.google?.accounts.id.renderButton(googleButtonRef.current, {
+          theme: "outline",
+          size: "large",
+          type: "standard",
+          shape: "rectangular",
+          text: "signin_with",
+          logo_alignment: "left",
+          width: googleButtonRef.current.offsetWidth || 340,
+        });
+      }
       setReady(true);
       setError("");
-    };
+    }
+
+    const existing = document.querySelector<HTMLScriptElement>('script[src="https://accounts.google.com/gsi/client"]');
+    const script = existing ?? document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = initializeGoogle;
     script.onerror = () => setError("Could not load Google sign-in. Check your network and try again.");
 
     if (!existing) {
       document.head.appendChild(script);
     } else if (window.google) {
-      window.google.accounts.id.initialize({
-        client_id: googleClientId,
-        ux_mode: "popup",
-        auto_select: false,
-        cancel_on_tap_outside: true,
-        callback: (googleResponse) => {
-          if (!googleResponse.credential) {
-            setLoading(false);
-            setError("Google did not return a login credential. Please try again.");
-            return;
-          }
-
-          fetch(`${apiUrl}/api/auth/google`, {
-            method: "POST",
-            credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ credential: googleResponse.credential, username, password }),
-          })
-            .then(async (res) => {
-              if (!res.ok) {
-                const body = await res.json().catch(() => ({ detail: "Google login failed" }));
-                throw new Error(body.detail ?? "Google login failed");
-              }
-              return res.json();
-            })
-            .then(onLogin)
-            .catch((err: Error) => setError(err.message))
-            .finally(() => setLoading(false));
-        },
-      });
-      setReady(true);
-      setError("");
+      initializeGoogle();
     }
-  }, [onLogin]);
+  }, [onLogin, password, username]);
 
   function signIn() {
-    if (!googleClientId) {
-      setError("Google OAuth is not configured. Add VITE_GOOGLE_CLIENT_ID before signing in.");
-      return;
-    }
-    if (!window.google || !ready) {
-      setError("Google sign-in is still loading. Please try again in a moment.");
-      return;
-    }
-    setError("");
-    setLoading(true);
-    window.google.accounts.id.prompt((notification) => {
-      if (notification.isNotDisplayed()) {
-        setLoading(false);
-        setError(`Google popup was not displayed: ${notification.getNotDisplayedReason()}`);
-      }
-      if (notification.isSkippedMoment()) {
-        setLoading(false);
-        setError(`Google sign-in was skipped: ${notification.getSkippedReason()}`);
-      }
-    });
+    googleButtonRef.current?.querySelector<HTMLElement>('[role="button"]')?.click();
   }
 
   function passwordSignIn() {
@@ -328,8 +294,8 @@ function LoginGate({ onLogin }: { onLogin: (session: Session) => void }) {
       .finally(() => setLoading(false));
   }
 
-  function showProviderSetup(provider: string) {
-    setError(`${provider} login is not enabled yet. Google login and saved email/password login are available now.`);
+  function startProvider(provider: "github" | "sso") {
+    window.location.href = `${apiUrl}/api/auth/${provider}/start`;
   }
 
   return (
@@ -356,14 +322,12 @@ function LoginGate({ onLogin }: { onLogin: (session: Session) => void }) {
           <h2>Sign in</h2>
           <p>Welcome back to your CloudMeter AI workspace.</p>
           <div className="provider-grid">
-            <button className="provider-button provider-disabled" type="button" onClick={() => showProviderSetup("GitHub")} disabled={loading}>
-              <Github size={24} /> Github <small>Coming soon</small>
+            <button className="provider-button" type="button" onClick={() => startProvider("github")} disabled={loading}>
+              <Github size={24} /> Github
             </button>
-            <button className="provider-button" type="button" onClick={signIn} disabled={loading || !ready || !googleClientId}>
-              <span className="google-mark">G</span> {loading ? "Waiting..." : "Google"}
-            </button>
-            <button className="provider-button provider-wide provider-disabled" type="button" onClick={() => showProviderSetup("SSO")} disabled={loading}>
-              <KeyRound size={24} /> SSO <small>Coming soon</small>
+            <div className="google-native-slot" ref={googleButtonRef} />
+            <button className="provider-button provider-wide" type="button" onClick={() => startProvider("sso")} disabled={loading}>
+              <KeyRound size={24} /> SSO
             </button>
           </div>
           <div className="login-divider"><span>OR</span></div>

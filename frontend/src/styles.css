@@ -358,6 +358,16 @@ input {
   font-weight: 800;
 }
 
+.google-native-slot {
+  min-height: 48px;
+  display: grid;
+  align-items: center;
+}
+
+.google-native-slot > div {
+  width: 100% !important;
+}
+
 .provider-button small {
   color: #8a96a8;
   font-size: 12px;
