@@ -190,34 +190,45 @@ input {
 
 .login-shell {
   min-height: 100vh;
-  padding: 34px 18px;
-  display: flex;
-  align-items: flex-start;
+  padding: 22px;
+  display: grid;
+  place-items: center;
   justify-content: center;
   background:
-    radial-gradient(circle at 15% 0%, rgba(156, 237, 200, 0.26), transparent 24rem),
-    radial-gradient(circle at 88% 18%, rgba(245, 189, 79, 0.18), transparent 22rem),
-    #f4f7fb;
+    linear-gradient(135deg, rgba(16, 32, 28, 0.94), rgba(17, 57, 61, 0.88)),
+    url("https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&w=1600&q=80");
+  background-size: cover;
+  background-position: center;
 }
 
 .login-card {
-  width: min(1120px, 100%);
+  width: min(980px, 100%);
+  min-height: 580px;
   display: grid;
-  gap: 18px;
-  justify-items: center;
+  grid-template-columns: minmax(0, 0.92fr) 420px;
+  gap: 0;
+  align-items: stretch;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.26);
 }
 
 .login-brand {
-  min-height: 64px;
+  position: absolute;
+  top: 28px;
+  left: 28px;
+  min-height: 46px;
   display: flex;
   align-items: center;
-  gap: 14px;
-  color: #101417;
+  gap: 10px;
+  color: #eef8f2;
+  z-index: 1;
 }
 
 .login-brand span {
-  width: 58px;
-  height: 58px;
+  width: 42px;
+  height: 42px;
   display: grid;
   place-items: center;
   border-radius: 8px;
@@ -227,35 +238,67 @@ input {
 }
 
 .login-brand strong {
-  font-size: clamp(34px, 5vw, 56px);
+  font-size: 22px;
   line-height: 1;
   letter-spacing: 0;
 }
 
+.login-product {
+  padding: 92px 34px 34px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  color: #eef8f2;
+  background:
+    linear-gradient(155deg, rgba(16, 32, 28, 0.92), rgba(16, 73, 70, 0.72)),
+    url("https://images.unsplash.com/photo-1518186233392-c232efbf2373?auto=format&fit=crop&w=1200&q=80");
+  background-size: cover;
+  background-position: center;
+}
+
+.login-product .eyebrow {
+  color: #9cedc8;
+}
+
+.login-product h1 {
+  max-width: 460px;
+  font-size: clamp(32px, 4vw, 48px);
+  line-height: 1.02;
+}
+
+.login-product div {
+  display: grid;
+  gap: 9px;
+  margin-top: 26px;
+}
+
+.login-product label {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(238, 248, 242, 0.86);
+}
+
 .login-box {
-  width: min(980px, 100%);
-  min-height: 690px;
-  padding: clamp(30px, 6vw, 72px) clamp(22px, 8vw, 150px);
-  border-radius: 8px;
+  width: 100%;
+  min-height: 580px;
+  padding: 34px;
   background: #ffffff;
   color: #101417;
-  border: 1px solid #dfe5ee;
-  box-shadow: 0 2px 0 rgba(16, 20, 23, 0.02), 0 28px 70px rgba(34, 51, 72, 0.08);
 }
 
 .login-box h2 {
-  margin: 18px 0 16px;
-  text-align: center;
-  font-size: clamp(42px, 6vw, 64px);
+  margin: 4px 0 8px;
+  font-size: 34px;
   line-height: 1;
   color: #0d1114;
 }
 
 .login-box > p {
-  margin-bottom: 52px;
-  text-align: center;
+  margin-bottom: 20px;
   color: #596273;
-  font-size: clamp(19px, 2vw, 28px);
+  font-size: 15px;
   line-height: 1.35;
 }
 
@@ -266,23 +309,23 @@ input {
 }
 
 .login-box label {
-  margin-top: 18px;
+  margin-top: 12px;
   color: #101417;
-  font-size: 20px;
+  font-size: 13px;
   font-weight: 800;
 }
 
 .login-box input {
   width: 100%;
-  height: 72px;
-  margin: 10px 0 0;
-  padding: 0 22px;
+  height: 46px;
+  margin: 6px 0 0;
+  padding: 0 12px;
   border: 1px solid #d9dee8;
   border-radius: 8px;
   outline: 0;
   color: #101417;
   background: #ffffff;
-  font-size: 20px;
+  font-size: 15px;
 }
 
 .login-box input::placeholder {
@@ -297,11 +340,11 @@ input {
 .provider-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 18px;
+  gap: 10px;
 }
 
 .provider-button {
-  height: 72px;
+  min-height: 48px;
   border: 1px solid #d9dee8;
   border-radius: 8px;
   display: flex;
@@ -311,7 +354,7 @@ input {
   color: #101417;
   background: #ffffff;
   cursor: pointer;
-  font-size: 26px;
+  font-size: 15px;
   font-weight: 800;
 }
 
@@ -354,13 +397,13 @@ input {
 }
 
 .login-divider {
-  min-height: 92px;
+  min-height: 42px;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
-  gap: 18px;
+  gap: 12px;
   align-items: center;
   color: #536176;
-  font-size: 22px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -395,9 +438,9 @@ input {
 }
 
 .forgot-row {
-  margin-top: 18px;
+  margin-top: 10px;
   color: #535c6f;
-  font-size: 20px;
+  font-size: 14px;
 }
 
 .forgot-row button,
@@ -414,9 +457,9 @@ input {
 .google-button,
 .password-button {
   width: 100%;
-  height: 76px;
-  margin-top: 38px;
-  margin-bottom: 22px;
+  height: 48px;
+  margin-top: 18px;
+  margin-bottom: 14px;
   border: 0;
   border-radius: 8px;
   display: flex;
@@ -426,7 +469,7 @@ input {
   background: #0d6efd;
   color: #ffffff;
   cursor: pointer;
-  font-size: 24px;
+  font-size: 16px;
   font-weight: 800;
 }
 
@@ -441,8 +484,8 @@ input {
 }
 
 .login-error {
-  margin: 0 0 22px;
-  padding: 14px 16px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
   border-radius: 8px;
   color: #6f2416;
   background: #ffe8e3;
@@ -451,9 +494,9 @@ input {
 }
 
 .login-box small {
-  margin-top: 34px;
+  margin-top: 18px;
   text-align: center;
-  font-size: 20px;
+  font-size: 14px;
 }
 
 .setup-shell {
@@ -1485,9 +1528,19 @@ td:last-child {
   .two,
   .main-grid,
   .onboarding-panel,
+  .login-card,
   .setup-frame,
   .profile-card {
     grid-template-columns: 1fr;
+  }
+
+  .login-card {
+    width: min(720px, 100%);
+  }
+
+  .login-product {
+    min-height: 260px;
+    padding-top: 86px;
   }
 
   .setup-side {
@@ -1532,17 +1585,26 @@ td:last-child {
   }
 
   .login-card {
-    gap: 12px;
+    min-height: auto;
   }
 
   .login-brand span {
-    width: 46px;
-    height: 46px;
+    width: 38px;
+    height: 38px;
+  }
+
+  .login-product {
+    min-height: 230px;
+    padding: 82px 20px 20px;
+  }
+
+  .login-product h1 {
+    font-size: 30px;
   }
 
   .login-box {
     min-height: auto;
-    padding: 24px 16px;
+    padding: 22px 16px;
   }
 
   .login-box h2 {
@@ -1550,30 +1612,31 @@ td:last-child {
   }
 
   .login-box > p {
-    margin-bottom: 28px;
+    margin-bottom: 16px;
   }
 
   .provider-grid {
     grid-template-columns: 1fr;
-    gap: 12px;
+    gap: 8px;
   }
 
   .provider-button,
   .login-box input,
   .password-button {
-    height: 58px;
-    font-size: 18px;
+    min-height: 44px;
+    height: 44px;
+    font-size: 15px;
   }
 
   .login-divider {
-    min-height: 64px;
-    font-size: 18px;
+    min-height: 40px;
+    font-size: 12px;
   }
 
   .login-box label,
   .forgot-row,
   .login-box small {
-    font-size: 16px;
+    font-size: 13px;
   }
 
   .setup-shell {

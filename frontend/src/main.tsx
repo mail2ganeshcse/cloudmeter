@@ -339,6 +339,15 @@ function LoginGate({ onLogin }: { onLogin: (session: Session) => void }) {
           <span><Cloud size={34} /></span>
           <strong>CloudMeter AI</strong>
         </div>
+        <section className="login-product">
+          <span className="eyebrow">Infra billing cockpit</span>
+          <h1>Meter cloud, Kubernetes and AI usage without billing chaos.</h1>
+          <div>
+            <label><CheckCircle2 size={15} /> Read-only cluster onboarding</label>
+            <label><CheckCircle2 size={15} /> AI token and GPU chargeback</label>
+            <label><CheckCircle2 size={15} /> Multi-cloud invoice workflows</label>
+          </div>
+        </section>
         <aside className="login-box" onKeyDown={(event) => {
           if (event.key === "Enter") {
             passwordSignIn();
