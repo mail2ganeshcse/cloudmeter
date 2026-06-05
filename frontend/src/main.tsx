@@ -26,6 +26,7 @@ import {
   Terminal,
   UserCheck,
   LogOut,
+  Users,
   WalletCards,
   Zap,
 } from "lucide-react";
@@ -89,6 +90,19 @@ type Onboarding = {
     installCommand: string;
     verifyCommand: string;
   }>;
+};
+
+type ManagedUser = {
+  id: number;
+  name: string;
+  email: string;
+  avatar: string;
+  role: string;
+  provider: string;
+  hostedDomain: string;
+  firstLoginAt: string;
+  lastLoginAt: string;
+  sessions: number;
 };
 
 const fallback: Dashboard = {
@@ -301,6 +315,8 @@ function App() {
   const [activeView, setActiveView] = useState("Command");
   const [copied, setCopied] = useState("");
   const [authLoading, setAuthLoading] = useState(true);
+  const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
+  const [usersError, setUsersError] = useState("");
 
   useEffect(() => {
     fetch(`${apiUrl}/api/auth/me`, { credentials: "include" })
@@ -326,7 +342,27 @@ function App() {
   const maxTeam = useMemo(() => Math.max(...data.teamChargeback.map((p) => p.amount), 1), [data.teamChargeback]);
   const k8sRows = data.kubernetes.slice(0, 6);
   const aiRows = data.aiUsage.slice(0, 6);
-  const limited = session?.session.role !== "admin";
+  const isSuperadmin = session?.session.role === "superadmin";
+  const limited = session?.session.role !== "admin" && !isSuperadmin;
+
+  useEffect(() => {
+    if (!isSuperadmin) {
+      return;
+    }
+    fetch(`${apiUrl}/api/users`, { credentials: "include" })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ detail: "Could not load users" }));
+          throw new Error(body.detail ?? "Could not load users");
+        }
+        return res.json();
+      })
+      .then((body) => {
+        setManagedUsers(body.users ?? []);
+        setUsersError("");
+      })
+      .catch((err: Error) => setUsersError(err.message));
+  }, [isSuperadmin]);
 
   function copyCommand(value: string, label: string) {
     navigator.clipboard.writeText(value).then(() => {
@@ -362,8 +398,8 @@ function App() {
             <small>Usage Billing Platform</small>
           </div>
         </div>
-        {["Command", "Cloud", "Kubernetes", "AI Metering", "Invoices", "Alerts"].map((item, index) => {
-          const icons = [Gauge, Cloud, Boxes, Brain, Receipt, Bell];
+        {["Command", "Cloud", "Kubernetes", "AI Metering", "Invoices", "Alerts", ...(isSuperadmin ? ["User Management"] : [])].map((item, index) => {
+          const icons = [Gauge, Cloud, Boxes, Brain, Receipt, Bell, Users];
           const Icon = icons[index];
           return (
             <button key={item} className={activeView === item ? "active" : ""} onClick={() => setActiveView(item)}>
@@ -392,7 +428,11 @@ function App() {
         {limited && (
           <section className="access-strip">
             <ShieldCheck size={18} />
-            <span>{session.user.email} is in limited mode: dashboard view, one cluster onboarding, read-only reports, no invoice sending.</span>
+            <span>
+              {isSuperadmin
+                ? `${session.user.email} is the master superadmin account with full workspace and user-management access.`
+                : `${session.user.email} is in limited mode: dashboard view, one cluster onboarding, read-only reports, no invoice sending.`}
+            </span>
           </section>
         )}
 
@@ -560,6 +600,31 @@ function App() {
             ))}
           </article>
         </section>
+
+        {isSuperadmin && (
+          <section className="panel user-management">
+            <div className="panel-head"><div><span>Superadmin</span><h2>User Management</h2></div><Users size={22} /></div>
+            {usersError ? (
+              <p className="login-error">{usersError}</p>
+            ) : (
+              <table>
+                <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Provider</th><th>Sessions</th><th>Last login</th></tr></thead>
+                <tbody>
+                  {managedUsers.map((user) => (
+                    <tr key={user.id}>
+                      <td>{user.name}</td>
+                      <td>{user.email}</td>
+                      <td><span className={`role-pill ${user.role}`}>{user.role}</span></td>
+                      <td>{user.provider}</td>
+                      <td>{user.sessions}</td>
+                      <td>{new Date(user.lastLoginAt).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+        )}
       </section>
     </main>
   );

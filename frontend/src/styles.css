@@ -704,6 +704,31 @@ td:last-child {
   color: #3c4f49;
 }
 
+.user-management {
+  margin-top: 16px;
+}
+
+.role-pill {
+  display: inline-grid;
+  min-width: 76px;
+  place-items: center;
+  padding: 4px 8px;
+  border-radius: 99px;
+  color: #173c30;
+  background: #dff8ec;
+  font-weight: 800;
+}
+
+.role-pill.superadmin {
+  color: #10201c;
+  background: #f5bd4f;
+}
+
+.role-pill.viewer {
+  color: #3c4f49;
+  background: #e8eee9;
+}
+
 @media (max-width: 1120px) {
   .shell {
     grid-template-columns: 1fr;

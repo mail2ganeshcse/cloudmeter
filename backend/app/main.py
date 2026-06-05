@@ -83,17 +83,22 @@ def token_hash(token: str) -> str:
 
 
 def role_for_email(email: str) -> str:
-    domain = email.split("@")[-1].lower() if "@" in email else ""
+    normalized = email.lower()
+    if normalized == "raashviroyal@gmail.com":
+        return "superadmin"
+    domain = normalized.split("@")[-1] if "@" in normalized else ""
     return "admin" if domain in {"cloudmeter.ai", "example.com"} else "viewer"
 
 
 def limits_for_role(role: str) -> dict[str, bool | int]:
+    full_access = role in {"admin", "superadmin"}
     return {
         "canViewDashboard": True,
-        "canCreateInvoices": role == "admin",
+        "canCreateInvoices": full_access,
         "canConnectClusters": True,
-        "maxClusters": 1 if role == "viewer" else 25,
-        "dataRetentionDays": 7 if role == "viewer" else 365,
+        "canManageUsers": role == "superadmin",
+        "maxClusters": 1 if role == "viewer" else 999,
+        "dataRetentionDays": 7 if role == "viewer" else 3650,
     }
 
 
@@ -102,7 +107,7 @@ def session_payload(user: UserAccount, session_token: str | None = None) -> dict
         "session": {
             "provider": "google",
             "role": user.role,
-            "plan": "limited" if user.role == "viewer" else "workspace",
+            "plan": "limited" if user.role == "viewer" else "master" if user.role == "superadmin" else "workspace",
         },
         "user": {
             "id": user.id,
@@ -258,6 +263,38 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)) 
         db.commit()
     clear_session_cookie(response)
     return {"status": "ok"}
+
+
+@app.get("/api/users")
+def users(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user, _ = current_user_from_cookie(request, db)
+    if user.role != "superadmin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superadmin access required")
+
+    users_rows = db.query(UserAccount).order_by(UserAccount.last_login_at.desc()).all()
+    sessions_by_user = {
+        row[0]: row[1]
+        for row in db.query(UserSession.user_id, func.count(UserSession.id))
+        .group_by(UserSession.user_id)
+        .all()
+    }
+    return {
+        "users": [
+            {
+                "id": account.id,
+                "name": account.name,
+                "email": account.email,
+                "avatar": account.avatar,
+                "role": account.role,
+                "provider": account.provider,
+                "hostedDomain": account.hosted_domain,
+                "firstLoginAt": account.first_login_at.isoformat(),
+                "lastLoginAt": account.last_login_at.isoformat(),
+                "sessions": sessions_by_user.get(account.id, 0),
+            }
+            for account in users_rows
+        ]
+    }
 
 
 @app.get("/api/onboarding")
