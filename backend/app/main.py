@@ -92,6 +92,22 @@ class AgentHeartbeatRequest(BaseModel):
     status: str = "connected"
 
 
+class NamespaceSnapshot(BaseModel):
+    namespace: str
+    pods: int = 0
+    cpu_millicores: float = 0
+    memory_mib: float = 0
+
+
+class AgentSnapshotRequest(BaseModel):
+    token: str
+    cluster_name: str
+    provider: str = "Kubernetes"
+    node_count: int = 0
+    pod_count: int = 0
+    namespaces: list[NamespaceSnapshot] = []
+
+
 def cluster_install_command(cluster: ClusterConnection) -> str:
     return (
         "CLOUDMETER_TOKEN={token} CLOUDMETER_CLUSTER={cluster} "
@@ -722,6 +738,89 @@ def agent_heartbeat(payload: AgentHeartbeatRequest, db: Session = Depends(get_db
     }
 
 
+@app.post("/api/agent/snapshot")
+def agent_snapshot(payload: AgentSnapshotRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
+    cluster = db.query(ClusterConnection).filter(ClusterConnection.token == payload.token).first()
+    if not cluster:
+        first_customer = db.query(Customer).order_by(Customer.id).first()
+        if not first_customer:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No customer available for cluster registration")
+        cluster = ClusterConnection(
+            customer_id=first_customer.id,
+            cluster_name=payload.cluster_name,
+            provider=payload.provider,
+            environment="Discovered",
+            token=payload.token,
+            status="connected",
+            last_seen=datetime.now(UTC).isoformat(),
+        )
+        db.add(cluster)
+        db.flush()
+
+    cluster.cluster_name = payload.cluster_name or cluster.cluster_name
+    cluster.provider = payload.provider or cluster.provider
+    cluster.status = "connected"
+    cluster.last_seen = datetime.now(UTC).isoformat()
+
+    db.query(KubernetesCost).filter(KubernetesCost.cluster == cluster.cluster_name).delete()
+    month = datetime.now(UTC).strftime("%Y-%m")
+    rows_created = 0
+    for namespace in payload.namespaces:
+        if not namespace.namespace:
+            continue
+        cpu_cores = round(namespace.cpu_millicores / 1000, 3)
+        memory_gib = round(namespace.memory_mib / 1024, 3)
+        estimated_amount = round((cpu_cores * 120) + (memory_gib * 35) + (namespace.pods * 10))
+        db.add(
+            KubernetesCost(
+                customer_id=cluster.customer_id,
+                cluster=cluster.cluster_name,
+                namespace=namespace.namespace,
+                workload=f"{namespace.pods} live pods",
+                team=namespace.namespace,
+                cpu_core_hours=cpu_cores,
+                memory_gb_hours=memory_gib,
+                gpu_hours=0,
+                amount_inr=estimated_amount,
+                month=month,
+            )
+        )
+        rows_created += 1
+
+    if rows_created == 0:
+        db.add(
+            KubernetesCost(
+                customer_id=cluster.customer_id,
+                cluster=cluster.cluster_name,
+                namespace="cluster-summary",
+                workload=f"{payload.pod_count} live pods",
+                team="Platform",
+                cpu_core_hours=0,
+                memory_gb_hours=0,
+                gpu_hours=0,
+                amount_inr=0,
+                month=month,
+            )
+        )
+        rows_created = 1
+
+    db.commit()
+    db.refresh(cluster)
+    return {
+        "status": "ok",
+        "cluster": {
+            "id": cluster.id,
+            "clusterName": cluster.cluster_name,
+            "provider": cluster.provider,
+            "connectionStatus": cluster.status,
+            "lastSeen": cluster.last_seen,
+            "nodeCount": payload.node_count,
+            "podCount": payload.pod_count,
+            "namespaces": rows_created,
+        },
+    }
+
+
 @app.get("/api/agent/install.sh", response_class=PlainTextResponse)
 def agent_install_script() -> str:
     return """#!/usr/bin/env bash
@@ -760,6 +859,9 @@ rules:
   - apiGroups: ["", "apps", "batch", "metrics.k8s.io"]
     resources: ["pods", "nodes", "namespaces", "deployments", "statefulsets", "daemonsets", "jobs", "cronjobs"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -794,13 +896,71 @@ spec:
       serviceAccountName: cloudmeter-agent
       containers:
         - name: agent
-          image: busybox:1.36
+          image: alpine/k8s:1.31.0
           command:
             - sh
             - -c
             - |
+              cpu_to_mcores() {
+                value="$1"
+                case "$value" in
+                  *n) awk "BEGIN {printf \\"%.3f\\", substr(\\"$value\\",1,length(\\"$value\\")-1)/1000000}" ;;
+                  *u) awk "BEGIN {printf \\"%.3f\\", substr(\\"$value\\",1,length(\\"$value\\")-1)/1000}" ;;
+                  *m) printf "%s" "${value%m}" ;;
+                  *) awk "BEGIN {printf \\"%.3f\\", \\"$value\\"*1000}" ;;
+                esac
+              }
+              mem_to_mib() {
+                value="$1"
+                case "$value" in
+                  *Ki) awk "BEGIN {printf \\"%.3f\\", substr(\\"$value\\",1,length(\\"$value\\")-2)/1024}" ;;
+                  *Mi) printf "%s" "${value%Mi}" ;;
+                  *Gi) awk "BEGIN {printf \\"%.3f\\", substr(\\"$value\\",1,length(\\"$value\\")-2)*1024}" ;;
+                  *) printf "0" ;;
+                esac
+              }
+              post_snapshot() {
+                node_count="$(kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+                pod_count="$(kubectl get pods -A --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+                pod_counts="$(kubectl get pods -A --no-headers 2>/dev/null | awk '{count[$1]++} END {for (ns in count) print ns, count[ns]}')"
+                metrics="$(kubectl top pods -A --no-headers 2>/dev/null || true)"
+                namespaces_json=""
+                if [ -n "$metrics" ]; then
+                  namespaces_json="$(printf '%s\n' "$metrics" | awk '
+                    function cpu(v) {
+                      if (v ~ /n$/) return substr(v,1,length(v)-1)/1000000;
+                      if (v ~ /u$/) return substr(v,1,length(v)-1)/1000;
+                      if (v ~ /m$/) return substr(v,1,length(v)-1);
+                      return v*1000;
+                    }
+                    function mem(v) {
+                      if (v ~ /Ki$/) return substr(v,1,length(v)-2)/1024;
+                      if (v ~ /Mi$/) return substr(v,1,length(v)-2);
+                      if (v ~ /Gi$/) return substr(v,1,length(v)-2)*1024;
+                      return 0;
+                    }
+                    { pods[$1]++; cpu_sum[$1]+=cpu($3); mem_sum[$1]+=mem($4); }
+                    END {
+                      first=1;
+                      for (ns in pods) {
+                        if (!first) printf ",";
+                        first=0;
+                        printf "{\\"namespace\\":\\"%s\\",\\"pods\\":%d,\\"cpu_millicores\\":%.3f,\\"memory_mib\\":%.3f}", ns, pods[ns], cpu_sum[ns], mem_sum[ns];
+                      }
+                    }')"
+                else
+                  namespaces_json="$(printf '%s\n' "$pod_counts" | awk '
+                    NF >= 2 {
+                      if (!first_seen) { first_seen=1 } else { printf "," }
+                      printf "{\\"namespace\\":\\"%s\\",\\"pods\\":%d,\\"cpu_millicores\\":0,\\"memory_mib\\":0}", $1, $2;
+                    }')"
+                fi
+                payload="{\\"token\\":\\"${CLOUDMETER_TOKEN}\\",\\"cluster_name\\":\\"${CLOUDMETER_CLUSTER}\\",\\"provider\\":\\"${CLOUDMETER_PROVIDER:-Kubernetes}\\",\\"node_count\\":${node_count:-0},\\"pod_count\\":${pod_count:-0},\\"namespaces\\":[${namespaces_json}]}"
+                curl -fsSL -X POST "${API_URL}/api/agent/snapshot" -H "Content-Type: application/json" -d "$payload" || true
+              }
               while true; do
                 wget -qO- --header='Content-Type: application/json' --post-data="{\\"token\\":\\"${CLOUDMETER_TOKEN}\\",\\"cluster_name\\":\\"${CLOUDMETER_CLUSTER}\\",\\"provider\\":\\"${CLOUDMETER_PROVIDER:-Kubernetes}\\",\\"status\\":\\"connected\\"}" "${API_URL}/api/agent/heartbeat" || true
+                post_snapshot
                 echo "CloudMeter heartbeat sent for ${CLOUDMETER_CLUSTER}"
                 sleep 300
               done
@@ -818,6 +978,9 @@ EOF
 curl -fsSL -X POST "${API_URL}/api/agent/heartbeat" \
   -H "Content-Type: application/json" \
   -d '{"token":"'"${CLOUDMETER_TOKEN}"'","cluster_name":"'"${CLOUDMETER_CLUSTER}"'","provider":"'"${CLOUDMETER_PROVIDER:-Kubernetes}"'","status":"connected"}' >/dev/null || true
+
+echo "Waiting for first CloudMeter metrics snapshot..."
+kubectl logs -n cloudmeter-agent "deployment/${AGENT_NAME}" --tail=5 --request-timeout=10s 2>/dev/null || true
 
 echo "CloudMeter read-only agent installed for ${CLOUDMETER_CLUSTER}."
 echo "Verify with: kubectl get pods -n cloudmeter-agent -l app.kubernetes.io/instance=${CLUSTER_SLUG}"
@@ -840,7 +1003,13 @@ def dashboard(db: Session = Depends(get_db)) -> dict[str, Any]:
     ai_rows = db.query(AiUsage.provider, func.sum(AiUsage.amount_inr), func.sum(AiUsage.tokens), func.sum(AiUsage.requests)).group_by(AiUsage.provider).all()
     team_rows = db.query(KubernetesCost.team, func.sum(KubernetesCost.amount_inr)).group_by(KubernetesCost.team).order_by(func.sum(KubernetesCost.amount_inr).desc()).all()
 
-    namespaces = db.query(KubernetesCost).order_by(KubernetesCost.amount_inr.desc()).all()
+    clusters_by_name = {cluster.cluster_name: cluster for cluster in db.query(ClusterConnection).all()}
+    namespaces = db.query(KubernetesCost).all()
+    def is_live_cluster(cluster_name: str) -> bool:
+        cluster = clusters_by_name.get(cluster_name)
+        return bool(cluster and cluster.status == "connected" and "T" in cluster.last_seen)
+
+    namespaces.sort(key=lambda row: (0 if is_live_cluster(row.cluster) else 1, row.cluster, row.namespace))
     ai_usage = db.query(AiUsage).order_by(AiUsage.amount_inr.desc()).all()
     invoices = db.query(Invoice).order_by(Invoice.total_inr.desc()).all()
     alerts = db.query(BudgetAlert).order_by(BudgetAlert.current_inr.desc()).all()
@@ -883,6 +1052,7 @@ def dashboard(db: Session = Depends(get_db)) -> dict[str, Any]:
                 "memory": n.memory_gb_hours,
                 "gpu": n.gpu_hours,
                 "amount": money(n.amount_inr),
+                "source": "live" if is_live_cluster(n.cluster) else "demo",
             }
             for n in namespaces
         ],

@@ -1526,6 +1526,22 @@ td:last-child {
   background: #e8eee9;
 }
 
+.source-pill {
+  display: inline-grid;
+  min-width: 54px;
+  place-items: center;
+  padding: 4px 8px;
+  border-radius: 99px;
+  color: #3c4f49;
+  background: #e8eee9;
+  font-weight: 900;
+}
+
+.source-pill.live {
+  color: #10201c;
+  background: #9cedc8;
+}
+
 @media (max-width: 1120px) {
   .shell {
     grid-template-columns: 1fr;

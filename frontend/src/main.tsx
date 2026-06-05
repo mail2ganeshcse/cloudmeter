@@ -973,11 +973,11 @@ function App() {
               <article className="panel wide">
                 <div className="panel-head"><div><span>Kubernetes Costing</span><h2>Namespace and pod-level chargeback</h2></div><ServerCog size={22} /></div>
                 <table>
-                  <thead><tr><th>Namespace</th><th>Workload</th><th>Team</th><th>CPU</th><th>GPU</th><th>Cost</th></tr></thead>
+                  <thead><tr><th>Cluster</th><th>Namespace</th><th>Workload</th><th>CPU</th><th>Memory</th><th>Source</th><th>Cost</th></tr></thead>
                   <tbody>
                     {k8sRows.map((row) => (
                       <tr key={`${row.namespace}-${row.workload}`}>
-                        <td>{row.namespace}</td><td>{row.workload}</td><td>{row.team}</td><td>{compact(Number(row.cpu))}</td><td>{row.gpu}</td><td>{formatInr(Number(row.amount))}</td>
+                        <td>{row.cluster}</td><td>{row.namespace}</td><td>{row.workload}</td><td>{compact(Number(row.cpu))} cores</td><td>{compact(Number(row.memory))} GiB</td><td><span className={`source-pill ${String(row.source)}`}>{row.source}</span></td><td>{formatInr(Number(row.amount))}</td>
                       </tr>
                     ))}
                   </tbody>

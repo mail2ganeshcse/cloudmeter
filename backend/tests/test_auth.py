@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import UserAccount, UserSession
+from app.models import ClusterConnection, Customer, KubernetesCost, UserAccount, UserSession
 from app.settings import settings
 
 
@@ -288,3 +288,61 @@ def test_agent_install_script_uses_valid_shell_json(client):
     assert '"cluster_name":"\'"${CLOUDMETER_CLUSTER}"\'"' in script
     assert 'AGENT_NAME="cloudmeter-agent-${CLUSTER_SLUG}"' in script
     assert "app.kubernetes.io/instance: ${CLUSTER_SLUG}" in script
+    assert "/api/agent/snapshot" in script
+
+
+def test_agent_snapshot_replaces_cluster_demo_rows(client, db_session):
+    customer = Customer(name="Snapshot Co", segment="SaaS", region="India", billing_model="K8s")
+    db_session.add(customer)
+    db_session.flush()
+    db_session.add(
+        ClusterConnection(
+            customer_id=customer.id,
+            cluster_name="real-cluster",
+            provider="Anywhere",
+            environment="Production",
+            token="cm_real_cluster",
+            status="pending",
+        )
+    )
+    db_session.add(
+        KubernetesCost(
+            customer_id=customer.id,
+            cluster="real-cluster",
+            namespace="demo",
+            workload="old-demo",
+            team="Demo",
+            cpu_core_hours=999,
+            memory_gb_hours=999,
+            gpu_hours=0,
+            amount_inr=999,
+            month="2026-06",
+        )
+    )
+    db_session.commit()
+
+    response = client.post(
+        "/api/agent/snapshot",
+        json={
+            "token": "cm_real_cluster",
+            "cluster_name": "real-cluster",
+            "provider": "Anywhere",
+            "node_count": 2,
+            "pod_count": 3,
+            "namespaces": [
+                {"namespace": "payments", "pods": 2, "cpu_millicores": 250, "memory_mib": 512},
+                {"namespace": "qa", "pods": 1, "cpu_millicores": 50, "memory_mib": 128},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    rows = db_session.query(KubernetesCost).filter(KubernetesCost.cluster == "real-cluster").order_by(KubernetesCost.namespace).all()
+    assert [row.namespace for row in rows] == ["payments", "qa"]
+    assert rows[0].cpu_core_hours == 0.25
+    assert rows[0].memory_gb_hours == 0.5
+
+    dashboard = client.get("/api/dashboard")
+    assert dashboard.status_code == 200
+    real_rows = [row for row in dashboard.json()["kubernetes"] if row["cluster"] == "real-cluster"]
+    assert real_rows[0]["source"] == "live"
