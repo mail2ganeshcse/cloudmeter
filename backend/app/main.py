@@ -100,6 +100,13 @@ class NamespaceSnapshot(BaseModel):
     memory_mib: float = 0
 
 
+class PodSnapshot(BaseModel):
+    namespace: str
+    pod: str
+    cpu_millicores: float = 0
+    memory_mib: float = 0
+
+
 class AgentSnapshotRequest(BaseModel):
     token: str
     cluster_name: str
@@ -107,6 +114,7 @@ class AgentSnapshotRequest(BaseModel):
     node_count: int = 0
     pod_count: int = 0
     namespaces: list[NamespaceSnapshot] = []
+    pods: list[PodSnapshot] = []
 
 
 class NetworkMetric(BaseModel):
@@ -787,19 +795,19 @@ def agent_snapshot(payload: AgentSnapshotRequest, db: Session = Depends(get_db))
     db.query(KubernetesCost).filter(KubernetesCost.cluster == cluster.cluster_name).delete()
     month = datetime.now(UTC).strftime("%Y-%m")
     rows_created = 0
-    for namespace in payload.namespaces:
-        if not namespace.namespace:
+    for pod in payload.pods:
+        if not pod.namespace or not pod.pod:
             continue
-        cpu_cores = round(namespace.cpu_millicores / 1000, 3)
-        memory_gib = round(namespace.memory_mib / 1024, 3)
-        estimated_amount = round((cpu_cores * 120) + (memory_gib * 35) + (namespace.pods * 10))
+        cpu_cores = round(pod.cpu_millicores / 1000, 3)
+        memory_gib = round(pod.memory_mib / 1024, 3)
+        estimated_amount = round((cpu_cores * 120) + (memory_gib * 35) + 2)
         db.add(
             KubernetesCost(
                 customer_id=cluster.customer_id,
                 cluster=cluster.cluster_name,
-                namespace=namespace.namespace,
-                workload=f"{namespace.pods} live pods",
-                team=namespace.namespace,
+                namespace=pod.namespace,
+                workload=f"pod/{pod.pod}",
+                team=pod.namespace,
                 cpu_core_hours=cpu_cores,
                 memory_gb_hours=memory_gib,
                 gpu_hours=0,
@@ -808,6 +816,29 @@ def agent_snapshot(payload: AgentSnapshotRequest, db: Session = Depends(get_db))
             )
         )
         rows_created += 1
+
+    if rows_created == 0:
+        for namespace in payload.namespaces:
+            if not namespace.namespace:
+                continue
+            cpu_cores = round(namespace.cpu_millicores / 1000, 3)
+            memory_gib = round(namespace.memory_mib / 1024, 3)
+            estimated_amount = round((cpu_cores * 120) + (memory_gib * 35) + (namespace.pods * 10))
+            db.add(
+                KubernetesCost(
+                    customer_id=cluster.customer_id,
+                    cluster=cluster.cluster_name,
+                    namespace=namespace.namespace,
+                    workload=f"{namespace.pods} live pods",
+                    team=namespace.namespace,
+                    cpu_core_hours=cpu_cores,
+                    memory_gb_hours=memory_gib,
+                    gpu_hours=0,
+                    amount_inr=estimated_amount,
+                    month=month,
+                )
+            )
+            rows_created += 1
 
     if rows_created == 0:
         db.add(
@@ -1014,6 +1045,7 @@ spec:
                 pod_counts="$(kubectl get pods -A --no-headers 2>/dev/null | awk '{count[$1]++} END {for (ns in count) print ns, count[ns]}')"
                 metrics="$(kubectl top pods -A --no-headers 2>/dev/null || true)"
                 namespaces_json=""
+                pods_json=""
                 if [ -n "$metrics" ]; then
                   namespaces_json="$(printf '%s\\n' "$metrics" | awk '
                     function cpu(v) {
@@ -1037,14 +1069,36 @@ spec:
                         printf "{\\"namespace\\":\\"%s\\",\\"pods\\":%d,\\"cpu_millicores\\":%.3f,\\"memory_mib\\":%.3f}", ns, pods[ns], cpu_sum[ns], mem_sum[ns];
                       }
                     }')"
+                  pods_json="$(printf '%s\\n' "$metrics" | awk '
+                    function cpu(v) {
+                      if (v ~ /n$/) return substr(v,1,length(v)-1)/1000000;
+                      if (v ~ /u$/) return substr(v,1,length(v)-1)/1000;
+                      if (v ~ /m$/) return substr(v,1,length(v)-1);
+                      return v*1000;
+                    }
+                    function mem(v) {
+                      if (v ~ /Ki$/) return substr(v,1,length(v)-2)/1024;
+                      if (v ~ /Mi$/) return substr(v,1,length(v)-2);
+                      if (v ~ /Gi$/) return substr(v,1,length(v)-2)*1024;
+                      return 0;
+                    }
+                    {
+                      if (!first_seen) { first_seen=1 } else { printf "," }
+                      printf "{\\"namespace\\":\\"%s\\",\\"pod\\":\\"%s\\",\\"cpu_millicores\\":%.3f,\\"memory_mib\\":%.3f}", $1, $2, cpu($3), mem($4);
+                    }')"
                 else
                   namespaces_json="$(printf '%s\\n' "$pod_counts" | awk '
                     NF >= 2 {
                       if (!first_seen) { first_seen=1 } else { printf "," }
                       printf "{\\"namespace\\":\\"%s\\",\\"pods\\":%d,\\"cpu_millicores\\":0,\\"memory_mib\\":0}", $1, $2;
                     }')"
+                  pods_json="$(kubectl get pods -A --no-headers 2>/dev/null | awk '
+                    NF >= 2 {
+                      if (!first_seen) { first_seen=1 } else { printf "," }
+                      printf "{\\"namespace\\":\\"%s\\",\\"pod\\":\\"%s\\",\\"cpu_millicores\\":0,\\"memory_mib\\":0}", $1, $2;
+                    }')"
                 fi
-                payload="{\\"token\\":\\"${CLOUDMETER_TOKEN}\\",\\"cluster_name\\":\\"${CLOUDMETER_CLUSTER}\\",\\"provider\\":\\"${CLOUDMETER_PROVIDER:-Kubernetes}\\",\\"node_count\\":${node_count:-0},\\"pod_count\\":${pod_count:-0},\\"namespaces\\":[${namespaces_json}]}"
+                payload="{\\"token\\":\\"${CLOUDMETER_TOKEN}\\",\\"cluster_name\\":\\"${CLOUDMETER_CLUSTER}\\",\\"provider\\":\\"${CLOUDMETER_PROVIDER:-Kubernetes}\\",\\"node_count\\":${node_count:-0},\\"pod_count\\":${pod_count:-0},\\"namespaces\\":[${namespaces_json}],\\"pods\\":[${pods_json}]}"
                 curl -fsSL -X POST "${API_URL}/api/agent/snapshot" -H "Content-Type: application/json" -d "$payload" || true
               }
               while true; do
@@ -1308,38 +1362,40 @@ echo "Network agent: kubectl get pods -n cloudmeter-agent -l app.kubernetes.io/n
 def dashboard(db: Session = Depends(get_db)) -> dict[str, Any]:
     customers = db.query(Customer).order_by(Customer.name).all()
     cloud_total = money(db.query(func.sum(CloudSpend.amount_inr)).scalar())
-    kube_total = money(db.query(func.sum(KubernetesCost.amount_inr)).scalar())
     ai_total = money(db.query(func.sum(AiUsage.amount_inr)).scalar())
     invoice_total = money(db.query(func.sum(Invoice.total_inr)).scalar())
     tokens = money(db.query(func.sum(AiUsage.tokens)).scalar())
     requests = money(db.query(func.sum(AiUsage.requests)).scalar())
     gpu_seconds = money(db.query(func.sum(AiUsage.gpu_seconds)).scalar())
-    forecast_total = round((cloud_total + kube_total + ai_total) * 1.16)
-
-    provider_rows = db.query(CloudSpend.provider, func.sum(CloudSpend.amount_inr)).group_by(CloudSpend.provider).all()
-    ai_rows = db.query(AiUsage.provider, func.sum(AiUsage.amount_inr), func.sum(AiUsage.tokens), func.sum(AiUsage.requests)).group_by(AiUsage.provider).all()
-    team_rows = db.query(KubernetesCost.team, func.sum(KubernetesCost.amount_inr)).group_by(KubernetesCost.team).order_by(func.sum(KubernetesCost.amount_inr).desc()).all()
-
     clusters_by_name = {cluster.cluster_name: cluster for cluster in db.query(ClusterConnection).all()}
-    namespaces = db.query(KubernetesCost).all()
+    all_kubernetes_rows = db.query(KubernetesCost).all()
     def is_live_cluster(cluster_name: str) -> bool:
         cluster = clusters_by_name.get(cluster_name)
         return bool(cluster and cluster.status == "connected" and "T" in cluster.last_seen)
 
     def is_live_snapshot_row(row: KubernetesCost) -> bool:
-        return is_live_cluster(row.cluster) and row.workload.endswith(" live pods")
+        return is_live_cluster(row.cluster) and (row.workload.endswith(" live pods") or row.workload.startswith("pod/"))
 
+    live_kubernetes_rows = [row for row in all_kubernetes_rows if is_live_snapshot_row(row)]
+    namespaces = live_kubernetes_rows or all_kubernetes_rows
     namespaces.sort(key=lambda row: (0 if is_live_snapshot_row(row) else 1, row.cluster, row.namespace))
+    kube_total = money(sum(row.amount_inr for row in namespaces))
+    forecast_total = round((cloud_total + kube_total + ai_total) * 1.16)
+
+    provider_rows = db.query(CloudSpend.provider, func.sum(CloudSpend.amount_inr)).group_by(CloudSpend.provider).all()
+    ai_rows = db.query(AiUsage.provider, func.sum(AiUsage.amount_inr), func.sum(AiUsage.tokens), func.sum(AiUsage.requests)).group_by(AiUsage.provider).all()
     ai_usage = db.query(AiUsage).order_by(AiUsage.amount_inr.desc()).all()
     network_usage = db.query(NetworkUsage).order_by((NetworkUsage.rx_bytes_per_sec + NetworkUsage.tx_bytes_per_sec).desc()).all()
     invoices = db.query(Invoice).order_by(Invoice.total_inr.desc()).all()
     alerts = db.query(BudgetAlert).order_by(BudgetAlert.current_inr.desc()).all()
 
     chargeback = defaultdict(float)
+    kubernetes_team_cost = defaultdict(float)
     for row in db.query(CloudSpend.team, CloudSpend.amount_inr).all():
         chargeback[row.team] += row.amount_inr
-    for row in db.query(KubernetesCost.team, KubernetesCost.amount_inr).all():
+    for row in namespaces:
         chargeback[row.team] += row.amount_inr
+        kubernetes_team_cost[row.team] += row.amount_inr
     for row in db.query(AiUsage.product, AiUsage.amount_inr).all():
         chargeback[row.product] += row.amount_inr
 
@@ -1435,5 +1491,5 @@ def dashboard(db: Session = Depends(get_db)) -> dict[str, Any]:
             "Bill AI products by blended token, request, document, storage, and GPU dimensions.",
             "Use MSP invoice splits to pass through AWS, OCI, GCP, Kubernetes, and AI line items cleanly.",
         ],
-        "teamCost": [{"team": row[0], "amount": money(row[1])} for row in team_rows],
+        "teamCost": [{"team": team, "amount": money(amount)} for team, amount in sorted(kubernetes_team_cost.items(), key=lambda x: x[1], reverse=True)],
     }

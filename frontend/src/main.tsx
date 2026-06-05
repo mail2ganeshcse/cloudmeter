@@ -657,7 +657,7 @@ function App() {
   const maxProvider = useMemo(() => Math.max(...data.cloudProviders.map((p) => p.amount), 1), [data.cloudProviders]);
   const maxAi = useMemo(() => Math.max(...data.aiProviders.map((p) => p.amount), 1), [data.aiProviders]);
   const maxTeam = useMemo(() => Math.max(...data.teamChargeback.map((p) => p.amount), 1), [data.teamChargeback]);
-  const k8sRows = data.kubernetes.slice(0, 6);
+  const k8sRows = data.kubernetes;
   const aiRows = data.aiUsage.slice(0, 6);
   const isSuperadmin = session?.session.role === "superadmin";
   const limited = session?.session.role !== "admin" && !isSuperadmin;
@@ -1013,7 +1013,7 @@ function App() {
               <table>
                 <thead><tr><th>Cluster</th><th>Namespace</th><th>Workload</th><th>Ingress</th><th>Egress</th><th>Source</th><th>Observed</th></tr></thead>
                 <tbody>
-                  {(data.networkUsage ?? []).slice(0, 10).map((row) => (
+                  {(data.networkUsage ?? []).map((row) => (
                     <tr key={`${row.cluster}-${row.namespace}-${row.workload}`}>
                       <td>{row.cluster}</td>
                       <td>{row.namespace}</td>

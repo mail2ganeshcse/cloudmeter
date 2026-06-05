@@ -293,6 +293,7 @@ def test_agent_install_script_uses_valid_shell_json(client):
     assert "printf '%s\\n' \"$metrics\"" in script
     assert "printf '%s\\n' \"$pod_counts\"" in script
     assert "printf '%s\n' \"$metrics\"" not in script
+    assert '\\"pods\\":[${pods_json}]' in script
     assert "/api/agent/snapshot" in script
     assert 'NETWORK_AGENT_NAME="cloudmeter-network-agent-${CLUSTER_SLUG}"' in script
     assert "__NETWORK_AGENT_NAME__" in script
@@ -346,19 +347,25 @@ def test_agent_snapshot_replaces_cluster_demo_rows(client, db_session):
                 {"namespace": "payments", "pods": 2, "cpu_millicores": 250, "memory_mib": 512},
                 {"namespace": "qa", "pods": 1, "cpu_millicores": 50, "memory_mib": 128},
             ],
+            "pods": [
+                {"namespace": "payments", "pod": "api-1", "cpu_millicores": 200, "memory_mib": 256},
+                {"namespace": "payments", "pod": "worker-1", "cpu_millicores": 50, "memory_mib": 128},
+                {"namespace": "qa", "pod": "runner-1", "cpu_millicores": 25, "memory_mib": 64},
+            ],
         },
     )
 
     assert response.status_code == 200
-    rows = db_session.query(KubernetesCost).filter(KubernetesCost.cluster == "real-cluster").order_by(KubernetesCost.namespace).all()
-    assert [row.namespace for row in rows] == ["payments", "qa"]
-    assert rows[0].cpu_core_hours == 0.25
-    assert rows[0].memory_gb_hours == 0.5
+    rows = db_session.query(KubernetesCost).filter(KubernetesCost.cluster == "real-cluster").order_by(KubernetesCost.namespace, KubernetesCost.workload).all()
+    assert [row.workload for row in rows] == ["pod/api-1", "pod/worker-1", "pod/runner-1"]
+    assert rows[0].cpu_core_hours == 0.2
+    assert rows[0].memory_gb_hours == 0.25
 
     dashboard = client.get("/api/dashboard")
     assert dashboard.status_code == 200
     real_rows = [row for row in dashboard.json()["kubernetes"] if row["cluster"] == "real-cluster"]
     assert real_rows[0]["source"] == "live"
+    assert all(row["workload"].startswith("pod/") for row in real_rows)
 
 
 def test_agent_network_ingestion_updates_dashboard(client, db_session):
