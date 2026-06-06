@@ -162,6 +162,21 @@ def cluster_verify_command(cluster: ClusterConnection) -> str:
     return f"kubectl get pods -n cloudmeter-agent -l app.kubernetes.io/instance={cluster_slug(cluster.cluster_name)}"
 
 
+def onboarding_cluster_payload(cluster: ClusterConnection) -> dict[str, Any]:
+    return {
+        "id": cluster.id,
+        "customerId": cluster.customer_id,
+        "clusterName": cluster.cluster_name,
+        "provider": cluster.provider,
+        "environment": cluster.environment,
+        "status": cluster.status,
+        "agentMode": cluster.agent_mode,
+        "lastSeen": cluster.last_seen,
+        "installCommand": cluster_install_command(cluster),
+        "verifyCommand": cluster_verify_command(cluster),
+    }
+
+
 def token_hash(token: str) -> str:
     return sha256(token.encode("utf-8")).hexdigest()
 
@@ -725,21 +740,7 @@ def onboarding(db: Session = Depends(get_db)) -> dict[str, Any]:
             {"title": "Generate chargeback and invoices", "body": "Review namespace, team, customer, and AI product bills before sending invoices."},
         ],
         "prerequisites": ["kubectl access to the target cluster", "curl installed", "outbound HTTPS from the cluster", "read-only RBAC approval"],
-        "clusters": [
-            {
-                "id": c.id,
-                "customerId": c.customer_id,
-                "clusterName": c.cluster_name,
-                "provider": c.provider,
-                "environment": c.environment,
-                "status": c.status,
-                "agentMode": c.agent_mode,
-                "lastSeen": c.last_seen,
-                "installCommand": cluster_install_command(c),
-                "verifyCommand": cluster_verify_command(c),
-            }
-            for c in clusters
-        ],
+        "clusters": [onboarding_cluster_payload(c) for c in clusters],
     }
 
 
@@ -756,13 +757,19 @@ def create_cluster(payload: ClusterCreateRequest, db: Session = Depends(get_db))
     db.add(cluster)
     db.commit()
     db.refresh(cluster)
+    return onboarding_cluster_payload(cluster)
+
+
+@app.post("/api/onboarding/clusters/{cluster_id}/verify")
+def verify_cluster(cluster_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+    cluster = db.query(ClusterConnection).filter(ClusterConnection.id == cluster_id).first()
+    if not cluster:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cluster setup not found")
+    connected = cluster.status == "connected" and bool(cluster.last_seen)
     return {
-        "id": cluster.id,
-        "clusterName": cluster.cluster_name,
-        "provider": cluster.provider,
-        "status": cluster.status,
-        "installCommand": cluster_install_command(cluster),
-        "verifyCommand": cluster_verify_command(cluster),
+        "verified": connected,
+        "message": f"{cluster.cluster_name} is connected and reporting." if connected else f"{cluster.cluster_name} has not reported yet. Run the install command, then verify again.",
+        "cluster": onboarding_cluster_payload(cluster),
     }
 
 

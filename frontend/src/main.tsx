@@ -637,6 +637,11 @@ function App() {
   const [newPassword, setNewPassword] = useState("");
   const [passwordMessage, setPasswordMessage] = useState("");
   const [clusterRefreshMessage, setClusterRefreshMessage] = useState("");
+  const [connectorClusterName, setConnectorClusterName] = useState("stage-cluster");
+  const [generatedConnectorCluster, setGeneratedConnectorCluster] = useState<Onboarding["clusters"][number] | null>(null);
+  const [verifiedConnectorCluster, setVerifiedConnectorCluster] = useState<Onboarding["clusters"][number] | null>(null);
+  const [connectorSaving, setConnectorSaving] = useState(false);
+  const [connectorVerifying, setConnectorVerifying] = useState(false);
 
   useEffect(() => {
     fetch(`${apiUrl}/api/auth/me`, { credentials: "include" })
@@ -664,7 +669,7 @@ function App() {
   const aiRows = data.aiUsage.slice(0, 6);
   const isSuperadmin = session?.session.role === "superadmin";
   const limited = session?.session.role !== "admin" && !isSuperadmin;
-  const primaryCluster = onboarding?.clusters?.[0] ?? null;
+  const connectorCluster = generatedConnectorCluster ?? onboarding?.clusters?.find((cluster) => cluster.clusterName === connectorClusterName) ?? null;
   const pageCopy: Record<string, { title: string; body: string; icon: any }> = {
     Command: {
       title: "Command center",
@@ -748,6 +753,67 @@ function App() {
         window.setTimeout(() => setClusterRefreshMessage(""), 3500);
       })
       .catch(() => setClusterRefreshMessage("Could not refresh cluster status."));
+  }
+
+  function generateConnectorScript() {
+    const cleanName = connectorClusterName.trim();
+    if (!cleanName) {
+      setClusterRefreshMessage("Enter a cluster name before generating the script.");
+      return;
+    }
+    setConnectorSaving(true);
+    setClusterRefreshMessage("");
+    setVerifiedConnectorCluster(null);
+    fetch(`${apiUrl}/api/onboarding/clusters`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ customer_id: 1, cluster_name: cleanName, provider: "Any cloud / On-prem", environment: "Kubernetes" }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ detail: "Could not generate cluster script" }));
+          throw new Error(body.detail ?? "Could not generate cluster script");
+        }
+        return res.json();
+      })
+      .then((cluster) => {
+        setGeneratedConnectorCluster(cluster);
+        setOnboarding((current) => current ? { ...current, clusters: [cluster, ...current.clusters.filter((item) => item.id !== cluster.id)] } : current);
+        setClusterRefreshMessage(`Script generated for ${cluster.clusterName}. Run it from your kubectl terminal, then verify status.`);
+      })
+      .catch((err: Error) => setClusterRefreshMessage(err.message))
+      .finally(() => setConnectorSaving(false));
+  }
+
+  function verifyConnectorStatus() {
+    if (!connectorCluster) {
+      setClusterRefreshMessage("Generate a cluster script before verifying status.");
+      return;
+    }
+    setConnectorVerifying(true);
+    setClusterRefreshMessage("");
+    fetch(`${apiUrl}/api/onboarding/clusters/${connectorCluster.id}/verify`, { method: "POST", credentials: "include" })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ detail: "Could not verify cluster" }));
+          throw new Error(body.detail ?? "Could not verify cluster");
+        }
+        return res.json();
+      })
+      .then((body) => {
+        setGeneratedConnectorCluster(body.cluster);
+        setOnboarding((current) => current ? { ...current, clusters: [body.cluster, ...current.clusters.filter((item) => item.id !== body.cluster.id)] } : current);
+        if (body.verified) {
+          setVerifiedConnectorCluster(body.cluster);
+          fetch(`${apiUrl}/api/dashboard`).then((res) => res.json()).then(setData).catch(() => undefined);
+        } else {
+          setVerifiedConnectorCluster(null);
+        }
+        setClusterRefreshMessage(body.message);
+      })
+      .catch((err: Error) => setClusterRefreshMessage(err.message))
+      .finally(() => setConnectorVerifying(false));
   }
 
   function logout() {
@@ -1008,18 +1074,22 @@ function App() {
               <div className="cluster-stack">
                 <article className="cluster-card">
                   <div>
-                    <strong>Generic Kubernetes connector</strong>
+                    <strong>Kubernetes connector</strong>
                     <span>Any cloud / On-prem · Kubernetes · read-only</span>
                   </div>
-                  <em className={primaryCluster?.status ?? "pending"}>{primaryCluster?.status ?? "ready"}</em>
-                  <p>{primaryCluster ? `Active setup: ${primaryCluster.clusterName}` : "Generate a tokenized setup command from onboarding, then run it from any kubectl terminal."}</p>
-                  {primaryCluster && (
-                    <div className="cluster-actions">
-                      <button onClick={() => copyCommand(primaryCluster.installCommand, primaryCluster.clusterName)}><Copy size={16} /> {copied === primaryCluster.clusterName ? "Copied" : "Copy install"}</button>
-                      <button onClick={() => refreshClusterStatus(primaryCluster.clusterName)}><CheckCircle2 size={16} /> Refresh status</button>
-                      <button onClick={() => copyCommand(primaryCluster.verifyCommand, `${primaryCluster.clusterName}-verify`)}><Terminal size={16} /> {copied === `${primaryCluster.clusterName}-verify` ? "Copied" : "Copy kubectl verify"}</button>
-                    </div>
-                  )}
+                  <em className={verifiedConnectorCluster ? "connected" : "pending"}>{verifiedConnectorCluster ? "connected" : "not verified"}</em>
+                  <label>Cluster name</label>
+                  <input value={connectorClusterName} onChange={(event) => setConnectorClusterName(event.target.value)} placeholder="stage-cluster" />
+                  <p>{verifiedConnectorCluster ? `Verified cluster: ${verifiedConnectorCluster.clusterName}` : "Generate a tokenized script, run it from a terminal with kubectl access, then verify status here."}</p>
+                  <div className="cluster-actions">
+                    <button onClick={generateConnectorScript} disabled={connectorSaving}><Terminal size={16} /> {connectorSaving ? "Generating..." : "Generate script"}</button>
+                    {connectorCluster && (
+                      <>
+                        <button onClick={() => copyCommand(connectorCluster.installCommand, connectorCluster.clusterName)}><Copy size={16} /> {copied === connectorCluster.clusterName ? "Copied" : "Copy install"}</button>
+                        <button onClick={verifyConnectorStatus} disabled={connectorVerifying}><CheckCircle2 size={16} /> {connectorVerifying ? "Verifying..." : "Verify status"}</button>
+                      </>
+                    )}
+                  </div>
                 </article>
               </div>
             </section>

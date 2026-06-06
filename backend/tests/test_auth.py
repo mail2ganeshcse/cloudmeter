@@ -350,6 +350,38 @@ def test_agent_install_script_uses_valid_shell_json(client):
     assert "CLOUDMETER_PROMETHEUS_URL" in script
 
 
+def test_cluster_verify_reports_connected_status(client, db_session):
+    customer = Customer(name="Verify Co", segment="SaaS", region="India", billing_model="K8s")
+    db_session.add(customer)
+    db_session.flush()
+    cluster = ClusterConnection(
+        customer_id=customer.id,
+        cluster_name="verify-cluster",
+        provider="Any cloud / On-prem",
+        environment="Kubernetes",
+        token="cm_verify_cluster",
+        status="pending",
+        last_seen="Install command not run",
+    )
+    db_session.add(cluster)
+    db_session.commit()
+    db_session.refresh(cluster)
+
+    pending = client.post(f"/api/onboarding/clusters/{cluster.id}/verify")
+    assert pending.status_code == 200
+    assert pending.json()["verified"] is False
+
+    heartbeat = client.post(
+        "/api/agent/heartbeat",
+        json={"token": "cm_verify_cluster", "cluster_name": "verify-cluster", "provider": "Any cloud / On-prem", "status": "connected"},
+    )
+    assert heartbeat.status_code == 200
+    connected = client.post(f"/api/onboarding/clusters/{cluster.id}/verify")
+    assert connected.status_code == 200
+    assert connected.json()["verified"] is True
+    assert connected.json()["cluster"]["clusterName"] == "verify-cluster"
+
+
 def test_agent_snapshot_replaces_cluster_demo_rows(client, db_session):
     customer = Customer(name="Snapshot Co", segment="SaaS", region="India", billing_model="K8s")
     db_session.add(customer)
