@@ -53,6 +53,7 @@ type Dashboard = {
 
 type Session = {
   user: {
+    id: number;
     name: string;
     email: string;
     avatar: string;
@@ -631,6 +632,8 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
   const [usersError, setUsersError] = useState("");
+  const [usersMessage, setUsersMessage] = useState("");
+  const [savingRoleUserId, setSavingRoleUserId] = useState<number | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [passwordMessage, setPasswordMessage] = useState("");
   const [clusterRefreshMessage, setClusterRefreshMessage] = useState("");
@@ -701,10 +704,7 @@ function App() {
   };
   const ActiveIcon = pageCopy[activeView]?.icon ?? Gauge;
 
-  useEffect(() => {
-    if (!isSuperadmin) {
-      return;
-    }
+  function loadManagedUsers() {
     fetch(`${apiUrl}/api/users`, { credentials: "include" })
       .then(async (res) => {
         if (!res.ok) {
@@ -718,6 +718,13 @@ function App() {
         setUsersError("");
       })
       .catch((err: Error) => setUsersError(err.message));
+  }
+
+  useEffect(() => {
+    if (!isSuperadmin) {
+      return;
+    }
+    loadManagedUsers();
   }, [isSuperadmin]);
 
   function copyCommand(value: string, label: string) {
@@ -772,6 +779,40 @@ function App() {
         setPasswordMessage("Password saved. You can now login without Google.");
       })
       .catch((err: Error) => setPasswordMessage(err.message));
+  }
+
+  function updateManagedUserRole(user: ManagedUser, role: string) {
+    setSavingRoleUserId(user.id);
+    setUsersMessage("");
+    setUsersError("");
+    fetch(`${apiUrl}/api/users/${user.id}/role`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ detail: "Could not update role" }));
+          throw new Error(body.detail ?? "Could not update role");
+        }
+        return res.json();
+      })
+      .then((body) => {
+        setManagedUsers((current) => current.map((item) => (item.id === user.id ? body.user : item)));
+        setUsersMessage(`${body.user.email} is now ${body.user.role}.`);
+        if (session?.user.id === user.id) {
+          fetch(`${apiUrl}/api/auth/me`, { credentials: "include" })
+            .then((res) => (res.ok ? res.json() : null))
+            .then((updatedSession) => {
+              if (updatedSession) {
+                setSession(updatedSession);
+              }
+            });
+        }
+      })
+      .catch((err: Error) => setUsersError(err.message))
+      .finally(() => setSavingRoleUserId(null));
   }
 
   if (authLoading) {
@@ -1123,20 +1164,35 @@ function App() {
         {isSuperadmin && activeView === "User Management" && (
           <section className="panel user-management page-panel">
             <div className="panel-head"><div><span>Superadmin</span><h2>User Management</h2></div><Users size={22} /></div>
+            {usersMessage && <p className="cluster-refresh-message">{usersMessage}</p>}
             {usersError ? (
               <p className="login-error">{usersError}</p>
             ) : (
               <table>
-                <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Provider</th><th>Sessions</th><th>Last login</th></tr></thead>
+                <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Provider</th><th>Sessions</th><th>Last login</th><th>Edit</th></tr></thead>
                 <tbody>
                   {managedUsers.map((user) => (
                     <tr key={user.id}>
                       <td>{user.name}</td>
                       <td>{user.email}</td>
-                      <td><span className={`role-pill ${user.role}`}>{user.role}</span></td>
+                      <td>
+                        <select
+                          className={`role-select ${user.role}`}
+                          value={user.role}
+                          disabled={savingRoleUserId === user.id || user.email === "raashviroyal@gmail.com"}
+                          onChange={(event) => updateManagedUserRole(user, event.target.value)}
+                        >
+                          <option value="viewer">viewer</option>
+                          <option value="admin">admin</option>
+                          <option value="superadmin">superadmin</option>
+                        </select>
+                      </td>
                       <td>{user.provider}</td>
                       <td>{user.sessions}</td>
                       <td>{new Date(user.lastLoginAt).toLocaleString()}</td>
+                      <td>
+                        <span className={`role-pill ${user.role}`}>{savingRoleUserId === user.id ? "saving" : user.role}</span>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

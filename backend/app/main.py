@@ -79,6 +79,10 @@ class ProfileSetupRequest(BaseModel):
     phone_number: str = ""
 
 
+class UserRoleUpdateRequest(BaseModel):
+    role: str
+
+
 class ClusterCreateRequest(BaseModel):
     customer_id: int
     cluster_name: str
@@ -275,6 +279,21 @@ def session_payload(user: UserAccount, session_token: str | None = None) -> dict
     return payload
 
 
+def managed_user_payload(account: UserAccount, sessions_by_user: dict[int, int]) -> dict[str, Any]:
+    return {
+        "id": account.id,
+        "name": account.name,
+        "email": account.email,
+        "avatar": account.avatar,
+        "role": account.role,
+        "provider": account.provider,
+        "hostedDomain": account.hosted_domain,
+        "firstLoginAt": account.first_login_at.isoformat(),
+        "lastLoginAt": account.last_login_at.isoformat(),
+        "sessions": sessions_by_user.get(account.id, 0),
+    }
+
+
 def upsert_oauth_user(
     db: Session,
     *,
@@ -328,7 +347,8 @@ def upsert_oauth_user(
     user.username = user.username or normalized_email
     user.name = name or user.name
     user.avatar = avatar or user.avatar
-    user.role = role
+    if role == "superadmin":
+        user.role = role
     user.provider = provider
     user.hosted_domain = hosted_domain
     user.last_login_at = now
@@ -656,22 +676,36 @@ def users(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
         .all()
     }
     return {
-        "users": [
-            {
-                "id": account.id,
-                "name": account.name,
-                "email": account.email,
-                "avatar": account.avatar,
-                "role": account.role,
-                "provider": account.provider,
-                "hostedDomain": account.hosted_domain,
-                "firstLoginAt": account.first_login_at.isoformat(),
-                "lastLoginAt": account.last_login_at.isoformat(),
-                "sessions": sessions_by_user.get(account.id, 0),
-            }
-            for account in users_rows
-        ]
+        "users": [managed_user_payload(account, sessions_by_user) for account in users_rows]
     }
+
+
+@app.patch("/api/users/{user_id}/role")
+def update_user_role(user_id: int, payload: UserRoleUpdateRequest, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    actor, _ = current_user_from_cookie(request, db)
+    if actor.role != "superadmin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superadmin access required")
+
+    role = payload.role.strip().lower()
+    if role not in {"viewer", "admin", "superadmin"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Role must be viewer, admin, or superadmin")
+
+    target = db.query(UserAccount).filter(UserAccount.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if target.email.lower() == "raashviroyal@gmail.com" and role != "superadmin":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Master superadmin account cannot be demoted")
+
+    target.role = role
+    db.commit()
+    db.refresh(target)
+    sessions_by_user = {
+        row[0]: row[1]
+        for row in db.query(UserSession.user_id, func.count(UserSession.id))
+        .group_by(UserSession.user_id)
+        .all()
+    }
+    return {"user": managed_user_payload(target, sessions_by_user)}
 
 
 @app.get("/api/onboarding")

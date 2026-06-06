@@ -91,6 +91,51 @@ def test_google_login_updates_returning_user(client, db_session, monkeypatch):
     assert db_session.query(UserSession).count() == 2
 
 
+def test_superadmin_can_change_user_role_and_role_persists(client, db_session, monkeypatch):
+    monkeypatch.setattr("app.main.id_token.verify_oauth2_token", lambda *args: google_claims(email="user@gmail.com", sub="viewer-sub"))
+    viewer_login = client.post("/api/auth/google", json={"credential": "header.payload.signature"})
+    assert viewer_login.status_code == 200
+    viewer = db_session.query(UserAccount).filter(UserAccount.email == "user@gmail.com").first()
+    assert viewer.role == "viewer"
+    client.post("/api/auth/logout")
+
+    monkeypatch.setattr("app.main.id_token.verify_oauth2_token", lambda *args: google_claims(email="raashviroyal@gmail.com", sub="master-sub"))
+    admin_login = client.post("/api/auth/google", json={"credential": "header.payload.signature"})
+    assert admin_login.status_code == 200
+    assert admin_login.json()["session"]["role"] == "superadmin"
+
+    response = client.patch(f"/api/users/{viewer.id}/role", json={"role": "superadmin"})
+    assert response.status_code == 200
+    assert response.json()["user"]["role"] == "superadmin"
+    db_session.refresh(viewer)
+    assert viewer.role == "superadmin"
+    client.post("/api/auth/logout")
+
+    monkeypatch.setattr("app.main.id_token.verify_oauth2_token", lambda *args: google_claims(email="user@gmail.com", sub="viewer-sub"))
+    returning_login = client.post("/api/auth/google", json={"credential": "header.payload.signature"})
+    assert returning_login.status_code == 200
+    assert returning_login.json()["session"]["role"] == "superadmin"
+
+
+def test_viewer_cannot_change_roles_and_master_cannot_be_demoted(client, db_session, monkeypatch):
+    monkeypatch.setattr("app.main.id_token.verify_oauth2_token", lambda *args: google_claims(email="user@gmail.com", sub="viewer-sub"))
+    viewer_login = client.post("/api/auth/google", json={"credential": "header.payload.signature"})
+    assert viewer_login.status_code == 200
+    viewer = db_session.query(UserAccount).filter(UserAccount.email == "user@gmail.com").first()
+    response = client.patch(f"/api/users/{viewer.id}/role", json={"role": "admin"})
+    assert response.status_code == 403
+    client.post("/api/auth/logout")
+
+    monkeypatch.setattr("app.main.id_token.verify_oauth2_token", lambda *args: google_claims(email="raashviroyal@gmail.com", sub="master-sub"))
+    admin_login = client.post("/api/auth/google", json={"credential": "header.payload.signature"})
+    assert admin_login.status_code == 200
+    master = db_session.query(UserAccount).filter(UserAccount.email == "raashviroyal@gmail.com").first()
+    response = client.patch(f"/api/users/{master.id}/role", json={"role": "viewer"})
+    assert response.status_code == 400
+    db_session.refresh(master)
+    assert master.role == "superadmin"
+
+
 def test_google_login_rejects_missing_credential(client):
     response = client.post("/api/auth/google", json={})
 
