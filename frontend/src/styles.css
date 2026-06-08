@@ -1516,50 +1516,75 @@ h1 {
 
 .action-panel {
   background:
-    linear-gradient(155deg, rgba(16, 32, 28, 0.95), rgba(20, 69, 67, 0.88));
+    linear-gradient(155deg, #11241f, #183c35);
   color: #edf7f1;
+  overflow: hidden;
 }
 
 .action-panel .panel-head span {
-  color: rgba(237, 247, 241, 0.62);
+  color: rgba(237, 247, 241, 0.68);
+}
+
+.action-panel .panel-head h2 {
+  color: #ffffff;
 }
 
 .action-tiles {
   display: grid;
-  gap: 10px;
+  gap: 9px;
 }
 
 .action-tiles button {
-  min-height: 72px;
-  padding: 12px;
+  min-height: 76px;
+  padding: 11px;
   display: grid;
-  grid-template-columns: 34px 1fr;
-  gap: 4px 10px;
+  grid-template-columns: 42px minmax(0, 1fr) 24px;
+  gap: 10px;
   align-items: center;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   color: #edf7f1;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.075);
   cursor: pointer;
   text-align: left;
+  transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
 }
 
 .action-tiles button:hover {
-  background: rgba(156, 237, 200, 0.15);
+  transform: translateY(-1px);
+  border-color: rgba(156, 237, 200, 0.34);
+  background: rgba(156, 237, 200, 0.13);
 }
 
-.action-tiles button svg {
-  grid-row: span 2;
-  color: #9cedc8;
+.action-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: #10201c;
+  background: #9cedc8;
 }
 
-.action-tiles button span {
+.action-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.action-copy strong {
   font-weight: 900;
+  line-height: 1.15;
 }
 
-.action-tiles button small {
-  color: rgba(237, 247, 241, 0.68);
+.action-copy small {
+  color: rgba(237, 247, 241, 0.7);
   line-height: 1.35;
+}
+
+.action-arrow {
+  color: rgba(237, 247, 241, 0.56);
+  transform: rotate(-90deg);
 }
 
 .onboarding-panel {

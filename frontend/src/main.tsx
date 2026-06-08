@@ -1347,9 +1347,9 @@ function App() {
                     const ActionIcon = action.icon;
                     return (
                       <button key={action.label} onClick={() => setActiveView(action.view)}>
-                        <ActionIcon size={20} />
-                        <span>{action.label}</span>
-                        <small>{action.detail}</small>
+                        <span className="action-icon"><ActionIcon size={19} /></span>
+                        <span className="action-copy"><strong>{action.label}</strong><small>{action.detail}</small></span>
+                        <ChevronDown className="action-arrow" size={16} />
                       </button>
                     );
                   })}
