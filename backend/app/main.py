@@ -963,6 +963,23 @@ def verify_cluster(cluster_id: int, request: Request, db: Session = Depends(get_
     }
 
 
+@app.delete("/api/onboarding/clusters/{cluster_id}")
+def delete_cluster(cluster_id: int, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user, _ = current_user_from_cookie(request, db)
+    cluster = db.query(ClusterConnection).filter(ClusterConnection.id == cluster_id, ClusterConnection.owner_user_id == user.id).first()
+    if not cluster:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cluster setup not found")
+
+    cluster_name = cluster.cluster_name
+    owner_user_id = cluster.owner_user_id
+    db.query(KubernetesCost).filter(KubernetesCost.cluster == cluster_name, KubernetesCost.owner_user_id == owner_user_id).delete()
+    db.query(NetworkUsage).filter(NetworkUsage.cluster == cluster_name, NetworkUsage.owner_user_id == owner_user_id).delete()
+    db.query(ClusterNodeInventory).filter(ClusterNodeInventory.cluster == cluster_name, ClusterNodeInventory.owner_user_id == owner_user_id).delete()
+    db.delete(cluster)
+    db.commit()
+    return {"deleted": True, "clusterName": cluster_name}
+
+
 @app.post("/api/agent/heartbeat")
 def agent_heartbeat(payload: AgentHeartbeatRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
     cluster = db.query(ClusterConnection).filter(ClusterConnection.token == payload.token).first()

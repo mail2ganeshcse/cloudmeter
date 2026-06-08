@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import CloudIntegration, ClusterConnection, Customer, KubernetesCost, NetworkUsage, UserAccount, UserSession
+from app.models import CloudIntegration, ClusterConnection, ClusterNodeInventory, Customer, KubernetesCost, NetworkUsage, UserAccount, UserSession
 from app.settings import settings
 
 
@@ -383,6 +383,80 @@ def test_cluster_verify_reports_connected_status(client, db_session, monkeypatch
     assert connected.status_code == 200
     assert connected.json()["verified"] is True
     assert connected.json()["cluster"]["clusterName"] == "verify-cluster"
+
+
+def test_cluster_delete_removes_owned_cluster_data_only(client, db_session, monkeypatch):
+    login_as(client, monkeypatch, "owner@gmail.com", "owner-sub")
+    created = client.post(
+        "/api/onboarding/clusters",
+        json={"cluster_name": "delete-cluster", "provider": "Any cloud / On-prem", "environment": "Kubernetes"},
+    )
+    assert created.status_code == 200
+    cluster_id = created.json()["id"]
+    cluster = db_session.query(ClusterConnection).filter(ClusterConnection.id == cluster_id).first()
+    owner_id = cluster.owner_user_id
+
+    db_session.add(
+        KubernetesCost(
+            customer_id=cluster.customer_id,
+            owner_user_id=owner_id,
+            cluster="delete-cluster",
+            namespace="app",
+            workload="pod/api",
+            team="app",
+            cpu_core_hours=1,
+            memory_gb_hours=1,
+            gpu_hours=0,
+            amount_inr=100,
+            month="2026-06",
+        )
+    )
+    db_session.add(
+        NetworkUsage(
+            customer_id=cluster.customer_id,
+            owner_user_id=owner_id,
+            cluster="delete-cluster",
+            namespace="app",
+            workload="pod/api",
+            rx_bytes_per_sec=100,
+            tx_bytes_per_sec=200,
+            connections=2,
+            source="test",
+            observed_at=datetime.now(UTC),
+        )
+    )
+    db_session.add(
+        ClusterNodeInventory(
+            customer_id=cluster.customer_id,
+            owner_user_id=owner_id,
+            cluster="delete-cluster",
+            node_name="node-a",
+            instance_type="m5.large",
+            zone="zone-a",
+            provider_id="provider-node-a",
+            cpu_allocatable=2,
+            memory_gib=8,
+            hourly_inr=8,
+            source="test",
+            observed_at=datetime.now(UTC),
+        )
+    )
+    db_session.commit()
+
+    client.post("/api/auth/logout")
+    login_as(client, monkeypatch, "other@gmail.com", "other-sub")
+    forbidden = client.delete(f"/api/onboarding/clusters/{cluster_id}")
+    assert forbidden.status_code == 404
+
+    client.post("/api/auth/logout")
+    login_as(client, monkeypatch, "owner@gmail.com", "owner-sub")
+    deleted = client.delete(f"/api/onboarding/clusters/{cluster_id}")
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] is True
+    assert db_session.query(ClusterConnection).filter(ClusterConnection.id == cluster_id).first() is None
+    assert db_session.query(KubernetesCost).filter(KubernetesCost.cluster == "delete-cluster", KubernetesCost.owner_user_id == owner_id).count() == 0
+    assert db_session.query(NetworkUsage).filter(NetworkUsage.cluster == "delete-cluster", NetworkUsage.owner_user_id == owner_id).count() == 0
+    assert db_session.query(ClusterNodeInventory).filter(ClusterNodeInventory.cluster == "delete-cluster", ClusterNodeInventory.owner_user_id == owner_id).count() == 0
 
 
 def test_agent_snapshot_replaces_cluster_demo_rows(client, db_session, monkeypatch):

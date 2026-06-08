@@ -26,6 +26,7 @@ import {
   ShieldCheck,
   Sparkles,
   Terminal,
+  Trash2,
   PlugZap,
   LogOut,
   Users,
@@ -728,6 +729,7 @@ function App() {
   const [verifiedConnectorCluster, setVerifiedConnectorCluster] = useState<Onboarding["clusters"][number] | null>(null);
   const [connectorSaving, setConnectorSaving] = useState(false);
   const [connectorVerifying, setConnectorVerifying] = useState(false);
+  const [deletingClusterId, setDeletingClusterId] = useState<number | null>(null);
 
   useEffect(() => {
     fetch(`${apiUrl}/api/auth/me`, { credentials: "include" })
@@ -779,6 +781,7 @@ function App() {
   const limited = session?.session.role !== "admin" && !isSuperadmin;
   const visibleViews = ["Command", "Costing", "Cloud", "Kubernetes", "AI Metering", "Invoices", "Alerts", ...(isSuperadmin ? ["User Management"] : [])];
   const connectorCluster = generatedConnectorCluster ?? onboarding?.clusters?.find((cluster) => cluster.clusterName === connectorClusterName) ?? null;
+  const visibleConnectorClusters = onboarding?.clusters ?? [];
   const liveKubernetesRows = k8sRows.length;
   const networkNamespaces = new Set((data.networkUsage ?? []).map((row) => `${row.cluster}:${row.namespace}`)).size;
   const k8sNamespaces = k8sChargeback.length;
@@ -1253,6 +1256,39 @@ function App() {
       })
       .catch((err: Error) => setClusterRefreshMessage(err.message))
       .finally(() => setConnectorVerifying(false));
+  }
+
+  function deleteConnectorCluster(cluster: Onboarding["clusters"][number]) {
+    const confirmed = window.confirm(`Delete ${cluster.clusterName}? This removes the cluster connection and its captured Kubernetes, node, and network metrics from your workspace.`);
+    if (!confirmed) {
+      return;
+    }
+    setDeletingClusterId(cluster.id);
+    setClusterRefreshMessage("");
+    fetch(`${apiUrl}/api/onboarding/clusters/${cluster.id}`, { method: "DELETE", credentials: "include" })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ detail: "Could not delete cluster" }));
+          throw new Error(body.detail ?? "Could not delete cluster");
+        }
+        return res.json();
+      })
+      .then(() => {
+        setOnboarding((current) => current ? { ...current, clusters: current.clusters.filter((item) => item.id !== cluster.id) } : current);
+        if (generatedConnectorCluster?.id === cluster.id) {
+          setGeneratedConnectorCluster(null);
+        }
+        if (verifiedConnectorCluster?.id === cluster.id) {
+          setVerifiedConnectorCluster(null);
+        }
+        if (connectorClusterName === cluster.clusterName) {
+          setConnectorClusterName("");
+        }
+        setClusterRefreshMessage(`${cluster.clusterName} deleted from this workspace.`);
+        fetch(`${apiUrl}/api/dashboard`, { credentials: "include" }).then((res) => res.json()).then(setData).catch(() => undefined);
+      })
+      .catch((err: Error) => setClusterRefreshMessage(err.message))
+      .finally(() => setDeletingClusterId(null));
   }
 
   function logout() {
@@ -1974,10 +2010,47 @@ function App() {
                       <>
                         <button onClick={() => copyCommand(connectorCluster.installCommand, connectorCluster.clusterName)}><Copy size={16} /> {copied === connectorCluster.clusterName ? "Copied" : "Copy install"}</button>
                         <button onClick={verifyConnectorStatus} disabled={connectorVerifying}><CheckCircle2 size={16} /> {connectorVerifying ? "Verifying..." : "Verify status"}</button>
+                        <button className="danger" onClick={() => deleteConnectorCluster(connectorCluster)} disabled={deletingClusterId === connectorCluster.id}><Trash2 size={16} /> {deletingClusterId === connectorCluster.id ? "Deleting..." : "Delete cluster"}</button>
                       </>
                     )}
                   </div>
                 </article>
+                {visibleConnectorClusters.length ? (
+                  <div className="cluster-list">
+                    <span>Existing clusters</span>
+                    {visibleConnectorClusters.map((cluster) => (
+                      <article className="cluster-list-item" key={cluster.id}>
+                        <div>
+                          <strong>{cluster.clusterName}</strong>
+                          <small>{cluster.provider} · {cluster.environment} · {cluster.agentMode}</small>
+                        </div>
+                        <em className={cluster.status === "connected" ? "connected" : "pending"}>{cluster.status}</em>
+                        <div className="cluster-list-actions">
+                          <button onClick={() => copyCommand(cluster.installCommand, cluster.clusterName)}><Copy size={15} /> {copied === cluster.clusterName ? "Copied" : "Install"}</button>
+                          <button onClick={() => {
+                            setGeneratedConnectorCluster(cluster);
+                            setConnectorClusterName(cluster.clusterName);
+                            setVerifiedConnectorCluster(null);
+                            setConnectorVerifying(true);
+                            fetch(`${apiUrl}/api/onboarding/clusters/${cluster.id}/verify`, { method: "POST", credentials: "include" })
+                              .then((res) => res.json())
+                              .then((body) => {
+                                setGeneratedConnectorCluster(body.cluster);
+                                if (body.verified) {
+                                  setVerifiedConnectorCluster(body.cluster);
+                                  fetch(`${apiUrl}/api/dashboard`, { credentials: "include" }).then((res) => res.json()).then(setData).catch(() => undefined);
+                                }
+                                setClusterRefreshMessage(body.message);
+                              })
+                              .catch(() => setClusterRefreshMessage("Could not verify cluster."))
+                              .finally(() => setConnectorVerifying(false));
+                          }} disabled={connectorVerifying}><CheckCircle2 size={15} /> Verify</button>
+                          <button className="danger" onClick={() => deleteConnectorCluster(cluster)} disabled={deletingClusterId === cluster.id}><Trash2 size={15} /> {deletingClusterId === cluster.id ? "Deleting" : "Delete"}</button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             </section>
             <section className="panel user-management k8s-network-panel">
