@@ -1062,6 +1062,7 @@ spec:
             - sh
             - -c
             - |
+              agent_api_url="${CLOUDMETER_API_URL:-https://cloudmeter.in}"
               cpu_to_mcores() {
                 value="$1"
                 case "$value" in
@@ -1140,10 +1141,10 @@ spec:
                     }')"
                 fi
                 payload="{\\"token\\":\\"${CLOUDMETER_TOKEN}\\",\\"cluster_name\\":\\"${CLOUDMETER_CLUSTER}\\",\\"provider\\":\\"${CLOUDMETER_PROVIDER:-Kubernetes}\\",\\"node_count\\":${node_count:-0},\\"pod_count\\":${pod_count:-0},\\"namespaces\\":[${namespaces_json}],\\"pods\\":[${pods_json}]}"
-                curl -fsSL -X POST "${API_URL}/api/agent/snapshot" -H "Content-Type: application/json" -d "$payload" || true
+                curl -fsSL -X POST "${agent_api_url}/api/agent/snapshot" -H "Content-Type: application/json" -d "$payload" || true
               }
               while true; do
-                wget -qO- --header='Content-Type: application/json' --post-data="{\\"token\\":\\"${CLOUDMETER_TOKEN}\\",\\"cluster_name\\":\\"${CLOUDMETER_CLUSTER}\\",\\"provider\\":\\"${CLOUDMETER_PROVIDER:-Kubernetes}\\",\\"status\\":\\"connected\\"}" "${API_URL}/api/agent/heartbeat" || true
+                wget -qO- --header='Content-Type: application/json' --post-data="{\\"token\\":\\"${CLOUDMETER_TOKEN}\\",\\"cluster_name\\":\\"${CLOUDMETER_CLUSTER}\\",\\"provider\\":\\"${CLOUDMETER_PROVIDER:-Kubernetes}\\",\\"status\\":\\"connected\\"}" "${agent_api_url}/api/agent/heartbeat" || true
                 post_snapshot
                 echo "CloudMeter heartbeat sent for ${CLOUDMETER_CLUSTER}"
                 sleep 300

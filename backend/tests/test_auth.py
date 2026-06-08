@@ -339,6 +339,9 @@ def test_agent_install_script_uses_valid_shell_json(client):
     assert "printf '%s\\n' \"$pod_counts\"" in script
     assert "printf '%s\n' \"$metrics\"" not in script
     assert '\\"pods\\":[${pods_json}]' in script
+    assert 'agent_api_url="${CLOUDMETER_API_URL:-https://cloudmeter.in}"' in script
+    assert '"${agent_api_url}/api/agent/snapshot"' in script
+    assert '"${agent_api_url}/api/agent/heartbeat"' in script
     assert "/api/agent/snapshot" in script
     assert 'NETWORK_AGENT_NAME="cloudmeter-network-agent-${CLUSTER_SLUG}"' in script
     assert "__NETWORK_AGENT_NAME__" in script
