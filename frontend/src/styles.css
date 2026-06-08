@@ -1790,7 +1790,7 @@ h1 {
   min-width: 0;
   padding: 12px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 10px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.07);
@@ -1827,6 +1827,24 @@ h1 {
   background: #9cedc8;
 }
 
+.cluster-access {
+  align-self: start;
+  padding: 4px 8px;
+  border-radius: 99px;
+  color: #10201c;
+  background: #c7d6ff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.cluster-access.write {
+  background: #dff8ec;
+}
+
+.cluster-access.read {
+  background: #e8eee9;
+}
+
 .cluster-list-actions {
   grid-column: 1 / -1;
   display: flex;
@@ -1851,6 +1869,112 @@ h1 {
 .cluster-list-actions button:disabled {
   cursor: wait;
   opacity: 0.68;
+}
+
+.workspace-share-panel {
+  margin-top: 16px;
+  background:
+    linear-gradient(135deg, rgba(18, 114, 79, 0.09), transparent 34%),
+    rgba(255, 255, 255, 0.9);
+}
+
+.share-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) repeat(2, minmax(220px, 0.75fr));
+  gap: 12px;
+}
+
+.share-form,
+.share-list {
+  min-width: 0;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid rgba(16, 32, 28, 0.08);
+}
+
+.share-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.share-form label span {
+  color: #60736b;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.share-form input,
+.share-form select {
+  min-height: 42px;
+  border: 1px solid #d8e3de;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #10201c;
+  background: #f8fbf9;
+  font-weight: 850;
+}
+
+.share-form button,
+.share-list button {
+  min-height: 38px;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 8px;
+  color: #10201c;
+  background: #9cedc8;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.share-form p {
+  margin: 0;
+  color: #12724f;
+  font-weight: 850;
+  line-height: 1.4;
+}
+
+.share-list strong {
+  color: #10201c;
+  font-size: 15px;
+}
+
+.share-list div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px;
+  border-radius: 8px;
+  background: #f4faf7;
+}
+
+.share-list span {
+  color: #10201c;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.share-list small {
+  display: block;
+  margin-top: 3px;
+  color: #66776f;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.share-list button {
+  min-height: 32px;
+  padding: 0 10px;
+  color: #ffffff;
+  background: #b5402f;
 }
 
 .kubernetes-layout {
@@ -2859,6 +2983,7 @@ td:last-child {
   .network-intel-grid,
   .model-library-grid,
   .serverless-model-hero,
+  .share-grid,
   .command-grid,
   .two,
   .main-grid,

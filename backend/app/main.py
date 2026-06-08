@@ -34,6 +34,7 @@ from .models import (
     NetworkUsage,
     UserAccount,
     UserSession,
+    WorkspaceInvitation,
 )
 from .seed import seed_if_empty
 from .settings import settings
@@ -129,6 +130,20 @@ def cloud_integration_payload(integration: CloudIntegration) -> dict[str, Any]:
     }
 
 
+def workspace_invitation_payload(invitation: WorkspaceInvitation, owner: UserAccount | None = None) -> dict[str, Any]:
+    return {
+        "id": invitation.id,
+        "ownerUserId": invitation.owner_user_id,
+        "ownerEmail": owner.email if owner else "",
+        "email": invitation.invited_email,
+        "accessMode": invitation.access_mode,
+        "status": invitation.status,
+        "invitedUserId": invitation.invited_user_id,
+        "createdAt": invitation.created_at.isoformat(),
+        "acceptedAt": invitation.accepted_at.isoformat() if invitation.accepted_at else "",
+    }
+
+
 class GoogleLoginRequest(BaseModel):
     credential: str
     username: str | None = None
@@ -173,6 +188,11 @@ class ClusterCreateRequest(BaseModel):
     cluster_name: str
     provider: str
     environment: str = "Production"
+
+
+class WorkspaceInviteRequest(BaseModel):
+    email: str
+    access_mode: str = "read"
 
 
 class AgentHeartbeatRequest(BaseModel):
@@ -257,7 +277,7 @@ def cluster_verify_command(cluster: ClusterConnection) -> str:
     return f"kubectl get pods -n cloudmeter-agent -l app.kubernetes.io/instance={cluster_slug(cluster.cluster_name)}"
 
 
-def onboarding_cluster_payload(cluster: ClusterConnection) -> dict[str, Any]:
+def onboarding_cluster_payload(cluster: ClusterConnection, access_mode: str = "owner", owner: UserAccount | None = None) -> dict[str, Any]:
     return {
         "id": cluster.id,
         "customerId": cluster.customer_id,
@@ -267,8 +287,12 @@ def onboarding_cluster_payload(cluster: ClusterConnection) -> dict[str, Any]:
         "status": cluster.status,
         "agentMode": cluster.agent_mode,
         "lastSeen": cluster.last_seen,
-        "installCommand": cluster_install_command(cluster),
+        "installCommand": cluster_install_command(cluster) if access_mode in {"owner", "read-write"} else "",
         "verifyCommand": cluster_verify_command(cluster),
+        "accessMode": access_mode,
+        "isOwner": access_mode == "owner",
+        "canWrite": access_mode in {"owner", "read-write"},
+        "ownerEmail": owner.email if owner else "",
     }
 
 
@@ -543,6 +567,66 @@ def current_user_from_cookie(request: Request, db: Session) -> tuple[UserAccount
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
     return user, user_session
+
+
+def workspace_access_rows(user: UserAccount, db: Session) -> list[WorkspaceInvitation]:
+    invitations = (
+        db.query(WorkspaceInvitation)
+        .filter(
+            WorkspaceInvitation.invited_email == user.email.lower(),
+            WorkspaceInvitation.status.in_(["pending", "accepted"]),
+        )
+        .all()
+    )
+    now = datetime.now(UTC)
+    changed = False
+    for invitation in invitations:
+        if invitation.invited_user_id != user.id or invitation.status == "pending":
+            invitation.invited_user_id = user.id
+            invitation.status = "accepted"
+            invitation.accepted_at = invitation.accepted_at or now
+            changed = True
+    if changed:
+        db.commit()
+    return invitations
+
+
+def workspace_owner_ids_for_user(user: UserAccount, db: Session) -> list[int]:
+    owner_ids = {user.id}
+    owner_ids.update(invitation.owner_user_id for invitation in workspace_access_rows(user, db))
+    return sorted(owner_ids)
+
+
+def cluster_access_for_user(cluster_id: int, user: UserAccount, db: Session) -> tuple[ClusterConnection, str]:
+    cluster = db.query(ClusterConnection).filter(ClusterConnection.id == cluster_id, ~ClusterConnection.token.like("%_demo")).first()
+    if not cluster:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cluster setup not found")
+    if cluster.owner_user_id == user.id:
+        return cluster, "owner"
+    invitation = (
+        db.query(WorkspaceInvitation)
+        .filter(
+            WorkspaceInvitation.owner_user_id == cluster.owner_user_id,
+            WorkspaceInvitation.invited_email == user.email.lower(),
+            WorkspaceInvitation.status.in_(["pending", "accepted"]),
+        )
+        .first()
+    )
+    if invitation:
+        if invitation.status == "pending" or invitation.invited_user_id != user.id:
+            invitation.status = "accepted"
+            invitation.invited_user_id = user.id
+            invitation.accepted_at = invitation.accepted_at or datetime.now(UTC)
+            db.commit()
+        return cluster, invitation.access_mode
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cluster setup not found")
+
+
+def require_cluster_write_access(cluster_id: int, user: UserAccount, db: Session) -> tuple[ClusterConnection, str]:
+    cluster, access_mode = cluster_access_for_user(cluster_id, user, db)
+    if access_mode not in {"owner", "read-write"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Read-only shared access cannot modify this cluster")
+    return cluster, access_mode
 
 
 def verify_google_credential(credential: str) -> dict[str, Any]:
@@ -911,12 +995,26 @@ def create_cloud_integration(payload: CloudIntegrationRequest, request: Request,
 @app.get("/api/onboarding")
 def onboarding(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
     user, _ = current_user_from_cookie(request, db)
-    clusters = (
+    owned_clusters = (
         db.query(ClusterConnection)
         .filter(ClusterConnection.owner_user_id == user.id, ~ClusterConnection.token.like("%_demo"))
         .order_by(ClusterConnection.id.desc())
         .all()
     )
+    shared_access = workspace_access_rows(user, db)
+    shared_owner_ids = [invitation.owner_user_id for invitation in shared_access]
+    shared_clusters = (
+        db.query(ClusterConnection)
+        .filter(ClusterConnection.owner_user_id.in_(shared_owner_ids), ~ClusterConnection.token.like("%_demo"))
+        .order_by(ClusterConnection.id.desc())
+        .all()
+        if shared_owner_ids else []
+    )
+    owners = {
+        owner.id: owner
+        for owner in db.query(UserAccount).filter(UserAccount.id.in_({cluster.owner_user_id for cluster in shared_clusters})).all()
+    } if shared_clusters else {}
+    access_by_owner = {invitation.owner_user_id: invitation.access_mode for invitation in shared_access}
     return {
         "steps": [
             {"title": "Sign in with Google", "body": "Anyone can enter with a limited viewer workspace. Admins unlock invoices, chargeback edits, and more clusters."},
@@ -926,7 +1024,10 @@ def onboarding(request: Request, db: Session = Depends(get_db)) -> dict[str, Any
             {"title": "Generate chargeback and invoices", "body": "Review namespace, team, customer, and AI product bills before sending invoices."},
         ],
         "prerequisites": ["kubectl access to the target cluster", "curl installed", "outbound HTTPS from the cluster", "read-only RBAC approval"],
-        "clusters": [onboarding_cluster_payload(c) for c in clusters],
+        "clusters": (
+            [onboarding_cluster_payload(c, "owner", user) for c in owned_clusters]
+            + [onboarding_cluster_payload(c, access_by_owner.get(c.owner_user_id, "read"), owners.get(c.owner_user_id)) for c in shared_clusters]
+        ),
     }
 
 
@@ -949,26 +1050,95 @@ def create_cluster(payload: ClusterCreateRequest, request: Request, db: Session 
     return onboarding_cluster_payload(cluster)
 
 
+@app.get("/api/workspace/invitations")
+def workspace_invitations(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user, _ = current_user_from_cookie(request, db)
+    outgoing = (
+        db.query(WorkspaceInvitation)
+        .filter(WorkspaceInvitation.owner_user_id == user.id)
+        .order_by(WorkspaceInvitation.created_at.desc())
+        .all()
+    )
+    incoming = workspace_access_rows(user, db)
+    owners = {
+        owner.id: owner
+        for owner in db.query(UserAccount).filter(UserAccount.id.in_({invitation.owner_user_id for invitation in incoming})).all()
+    } if incoming else {}
+    return {
+        "outgoing": [workspace_invitation_payload(invitation, user) for invitation in outgoing],
+        "incoming": [workspace_invitation_payload(invitation, owners.get(invitation.owner_user_id)) for invitation in incoming],
+    }
+
+
+@app.post("/api/workspace/invitations")
+def create_workspace_invitation(payload: WorkspaceInviteRequest, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user, _ = current_user_from_cookie(request, db)
+    invited_email = payload.email.strip().lower()
+    access_mode = payload.access_mode.strip().lower()
+    if "@" not in invited_email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invite a valid email address")
+    if invited_email == user.email.lower():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You already own this workspace")
+    if access_mode not in {"read", "read-write"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Access mode must be read or read-write")
+
+    invited_user = db.query(UserAccount).filter(UserAccount.email == invited_email).first()
+    invitation = (
+        db.query(WorkspaceInvitation)
+        .filter(WorkspaceInvitation.owner_user_id == user.id, WorkspaceInvitation.invited_email == invited_email)
+        .first()
+    )
+    now = datetime.now(UTC)
+    if not invitation:
+        invitation = WorkspaceInvitation(
+            owner_user_id=user.id,
+            invited_email=invited_email,
+            access_mode=access_mode,
+            status="accepted" if invited_user else "pending",
+            invited_user_id=invited_user.id if invited_user else 0,
+            created_at=now,
+            accepted_at=now if invited_user else None,
+        )
+        db.add(invitation)
+    else:
+        invitation.access_mode = access_mode
+        invitation.status = "accepted" if invited_user else "pending"
+        invitation.invited_user_id = invited_user.id if invited_user else 0
+        invitation.accepted_at = now if invited_user else None
+    db.commit()
+    db.refresh(invitation)
+    return {"invitation": workspace_invitation_payload(invitation, user)}
+
+
+@app.delete("/api/workspace/invitations/{invitation_id}")
+def delete_workspace_invitation(invitation_id: int, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user, _ = current_user_from_cookie(request, db)
+    invitation = db.query(WorkspaceInvitation).filter(WorkspaceInvitation.id == invitation_id, WorkspaceInvitation.owner_user_id == user.id).first()
+    if not invitation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found")
+    invited_email = invitation.invited_email
+    db.delete(invitation)
+    db.commit()
+    return {"deleted": True, "email": invited_email}
+
+
 @app.post("/api/onboarding/clusters/{cluster_id}/verify")
 def verify_cluster(cluster_id: int, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
     user, _ = current_user_from_cookie(request, db)
-    cluster = db.query(ClusterConnection).filter(ClusterConnection.id == cluster_id, ClusterConnection.owner_user_id == user.id).first()
-    if not cluster:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cluster setup not found")
+    cluster, access_mode = cluster_access_for_user(cluster_id, user, db)
     connected = cluster.status == "connected" and bool(cluster.last_seen)
+    owner = db.query(UserAccount).filter(UserAccount.id == cluster.owner_user_id).first()
     return {
         "verified": connected,
         "message": f"{cluster.cluster_name} is connected and reporting." if connected else f"{cluster.cluster_name} has not reported yet. Run the install command, then verify again.",
-        "cluster": onboarding_cluster_payload(cluster),
+        "cluster": onboarding_cluster_payload(cluster, access_mode, owner),
     }
 
 
 @app.delete("/api/onboarding/clusters/{cluster_id}")
 def delete_cluster(cluster_id: int, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
     user, _ = current_user_from_cookie(request, db)
-    cluster = db.query(ClusterConnection).filter(ClusterConnection.id == cluster_id, ClusterConnection.owner_user_id == user.id).first()
-    if not cluster:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cluster setup not found")
+    cluster, _ = require_cluster_write_access(cluster_id, user, db)
 
     cluster_name = cluster.cluster_name
     owner_user_id = cluster.owner_user_id
@@ -1617,6 +1787,7 @@ echo "Network agent: kubectl get pods -n cloudmeter-agent -l app.kubernetes.io/n
 @app.get("/api/dashboard")
 def dashboard(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
     user, _ = current_user_from_cookie(request, db)
+    accessible_owner_ids = workspace_owner_ids_for_user(user, db)
     customers = db.query(Customer).order_by(Customer.name).all()
     cloud_total = money(db.query(func.sum(CloudSpend.amount_inr)).scalar())
     ai_total = money(db.query(func.sum(AiUsage.amount_inr)).scalar())
@@ -1625,16 +1796,16 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]
     requests = money(db.query(func.sum(AiUsage.requests)).scalar())
     gpu_seconds = money(db.query(func.sum(AiUsage.gpu_seconds)).scalar())
     clusters_by_name = {
-        cluster.cluster_name: cluster
-        for cluster in db.query(ClusterConnection).filter(ClusterConnection.owner_user_id == user.id).all()
+        (cluster.owner_user_id, cluster.cluster_name): cluster
+        for cluster in db.query(ClusterConnection).filter(ClusterConnection.owner_user_id.in_(accessible_owner_ids)).all()
     }
-    all_kubernetes_rows = db.query(KubernetesCost).filter(KubernetesCost.owner_user_id == user.id).all()
-    def is_live_cluster(cluster_name: str) -> bool:
-        cluster = clusters_by_name.get(cluster_name)
+    all_kubernetes_rows = db.query(KubernetesCost).filter(KubernetesCost.owner_user_id.in_(accessible_owner_ids)).all()
+    def is_live_cluster(row: KubernetesCost) -> bool:
+        cluster = clusters_by_name.get((row.owner_user_id, row.cluster))
         return bool(cluster and cluster.status == "connected" and "T" in cluster.last_seen)
 
     def is_live_snapshot_row(row: KubernetesCost) -> bool:
-        return is_live_cluster(row.cluster) and (row.workload.endswith(" live pods") or row.workload.startswith("pod/"))
+        return is_live_cluster(row) and (row.workload.endswith(" live pods") or row.workload.startswith("pod/"))
 
     live_kubernetes_rows = [row for row in all_kubernetes_rows if is_live_snapshot_row(row)]
     namespaces = live_kubernetes_rows or all_kubernetes_rows
@@ -1647,13 +1818,13 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]
     ai_usage = db.query(AiUsage).order_by(AiUsage.amount_inr.desc()).all()
     network_usage = (
         db.query(NetworkUsage)
-        .filter(NetworkUsage.owner_user_id == user.id)
+        .filter(NetworkUsage.owner_user_id.in_(accessible_owner_ids))
         .order_by((NetworkUsage.rx_bytes_per_sec + NetworkUsage.tx_bytes_per_sec).desc())
         .all()
     )
     node_inventory = (
         db.query(ClusterNodeInventory)
-        .filter(ClusterNodeInventory.owner_user_id == user.id)
+        .filter(ClusterNodeInventory.owner_user_id.in_(accessible_owner_ids))
         .order_by(ClusterNodeInventory.cluster, ClusterNodeInventory.node_name)
         .all()
     )

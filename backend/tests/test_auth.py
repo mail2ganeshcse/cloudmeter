@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import CloudIntegration, ClusterConnection, ClusterNodeInventory, Customer, KubernetesCost, NetworkUsage, UserAccount, UserSession
+from app.models import CloudIntegration, ClusterConnection, ClusterNodeInventory, Customer, KubernetesCost, NetworkUsage, UserAccount, UserSession, WorkspaceInvitation
 from app.settings import settings
 
 
@@ -629,3 +629,65 @@ def test_cluster_data_is_isolated_between_google_users(client, db_session, monke
     other_dashboard = client.get("/api/dashboard")
     assert other_dashboard.status_code == 200
     assert all(row["cluster"] != "private-cluster" for row in other_dashboard.json()["kubernetes"])
+
+
+def test_workspace_invite_shares_cluster_dashboard_with_access_modes(client, db_session, monkeypatch):
+    login_as(client, monkeypatch, "owner@gmail.com", "owner-sub")
+    created = client.post(
+        "/api/onboarding/clusters",
+        json={"cluster_name": "shared-cluster", "provider": "Any cloud / On-prem", "environment": "Kubernetes"},
+    )
+    assert created.status_code == 200
+    cluster_id = created.json()["id"]
+    cluster = db_session.query(ClusterConnection).filter(ClusterConnection.id == cluster_id).first()
+    db_session.add(
+        KubernetesCost(
+            customer_id=cluster.customer_id,
+            owner_user_id=cluster.owner_user_id,
+            cluster="shared-cluster",
+            namespace="apps",
+            workload="pod/app",
+            team="apps",
+            cpu_core_hours=0.2,
+            memory_gb_hours=0.5,
+            gpu_hours=0,
+            amount_inr=25,
+            month="2026-06",
+        )
+    )
+    db_session.commit()
+
+    read_invite = client.post("/api/workspace/invitations", json={"email": "reader@gmail.com", "access_mode": "read"})
+    assert read_invite.status_code == 200
+    assert read_invite.json()["invitation"]["status"] == "pending"
+    client.post("/api/auth/logout")
+
+    login_as(client, monkeypatch, "reader@gmail.com", "reader-sub")
+    onboarding = client.get("/api/onboarding")
+    assert onboarding.status_code == 200
+    shared = onboarding.json()["clusters"][0]
+    assert shared["clusterName"] == "shared-cluster"
+    assert shared["accessMode"] == "read"
+    assert shared["canWrite"] is False
+    assert shared["installCommand"] == ""
+    dashboard = client.get("/api/dashboard")
+    assert any(row["cluster"] == "shared-cluster" for row in dashboard.json()["kubernetes"])
+    delete_read = client.delete(f"/api/onboarding/clusters/{cluster_id}")
+    assert delete_read.status_code == 403
+    client.post("/api/auth/logout")
+
+    login_as(client, monkeypatch, "owner@gmail.com", "owner-sub")
+    write_invite = client.post("/api/workspace/invitations", json={"email": "writer@gmail.com", "access_mode": "read-write"})
+    assert write_invite.status_code == 200
+    client.post("/api/auth/logout")
+
+    login_as(client, monkeypatch, "writer@gmail.com", "writer-sub")
+    write_onboarding = client.get("/api/onboarding")
+    write_shared = write_onboarding.json()["clusters"][0]
+    assert write_shared["accessMode"] == "read-write"
+    assert write_shared["canWrite"] is True
+    assert "CLOUDMETER_TOKEN=" in write_shared["installCommand"]
+    delete_write = client.delete(f"/api/onboarding/clusters/{cluster_id}")
+    assert delete_write.status_code == 200
+    assert db_session.query(ClusterConnection).filter(ClusterConnection.id == cluster_id).first() is None
+    assert db_session.query(WorkspaceInvitation).filter(WorkspaceInvitation.invited_email == "reader@gmail.com").count() == 1

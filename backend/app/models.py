@@ -159,6 +159,19 @@ class ClusterConnection(Base):
     last_seen: Mapped[str] = mapped_column(String(80), default="Waiting for agent")
 
 
+class WorkspaceInvitation(Base):
+    __tablename__ = "workspace_invitations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(Integer, index=True)
+    invited_email: Mapped[str] = mapped_column(String(180), index=True)
+    access_mode: Mapped[str] = mapped_column(String(24), default="read")
+    status: Mapped[str] = mapped_column(String(24), default="pending")
+    invited_user_id: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class UserAccount(Base):
     __tablename__ = "user_accounts"
 

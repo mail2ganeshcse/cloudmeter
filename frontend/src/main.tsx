@@ -29,6 +29,7 @@ import {
   Trash2,
   PlugZap,
   LogOut,
+  UserPlus,
   Users,
   Eye,
   EyeOff,
@@ -111,7 +112,23 @@ type Onboarding = {
     lastSeen: string;
     installCommand: string;
     verifyCommand: string;
+    accessMode?: string;
+    isOwner?: boolean;
+    canWrite?: boolean;
+    ownerEmail?: string;
   }>;
+};
+
+type WorkspaceInvitation = {
+  id: number;
+  ownerUserId: number;
+  ownerEmail: string;
+  email: string;
+  accessMode: string;
+  status: string;
+  invitedUserId: number;
+  createdAt: string;
+  acceptedAt: string;
 };
 
 type ManagedUser = {
@@ -730,6 +747,11 @@ function App() {
   const [connectorSaving, setConnectorSaving] = useState(false);
   const [connectorVerifying, setConnectorVerifying] = useState(false);
   const [deletingClusterId, setDeletingClusterId] = useState<number | null>(null);
+  const [workspaceInvites, setWorkspaceInvites] = useState<{ outgoing: WorkspaceInvitation[]; incoming: WorkspaceInvitation[] }>({ outgoing: [], incoming: [] });
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteAccessMode, setInviteAccessMode] = useState("read");
+  const [inviteSaving, setInviteSaving] = useState(false);
+  const [inviteMessage, setInviteMessage] = useState("");
 
   useEffect(() => {
     fetch(`${apiUrl}/api/auth/me`, { credentials: "include" })
@@ -754,6 +776,10 @@ function App() {
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then(setOnboarding)
       .catch(() => setOnboarding(null));
+    fetch(`${apiUrl}/api/workspace/invitations`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((body) => setWorkspaceInvites({ outgoing: body.outgoing ?? [], incoming: body.incoming ?? [] }))
+      .catch(() => setWorkspaceInvites({ outgoing: [], incoming: [] }));
   }, [session?.user.id]);
 
   const maxProvider = useMemo(() => Math.max(...data.cloudProviders.map((p) => p.amount), 1), [data.cloudProviders]);
@@ -1259,6 +1285,10 @@ function App() {
   }
 
   function deleteConnectorCluster(cluster: Onboarding["clusters"][number]) {
+    if (cluster.canWrite === false) {
+      setClusterRefreshMessage("This cluster is shared read-only. Ask the owner for read-write access to modify it.");
+      return;
+    }
     const confirmed = window.confirm(`Delete ${cluster.clusterName}? This removes the cluster connection and its captured Kubernetes, node, and network metrics from your workspace.`);
     if (!confirmed) {
       return;
@@ -1289,6 +1319,55 @@ function App() {
       })
       .catch((err: Error) => setClusterRefreshMessage(err.message))
       .finally(() => setDeletingClusterId(null));
+  }
+
+  function saveWorkspaceInvite() {
+    const email = inviteEmail.trim().toLowerCase();
+    if (!email || !email.includes("@")) {
+      setInviteMessage("Enter a valid email address.");
+      return;
+    }
+    setInviteSaving(true);
+    setInviteMessage("");
+    fetch(`${apiUrl}/api/workspace/invitations`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, access_mode: inviteAccessMode }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ detail: "Could not save invitation" }));
+          throw new Error(body.detail ?? "Could not save invitation");
+        }
+        return res.json();
+      })
+      .then((body) => {
+        setWorkspaceInvites((current) => ({
+          ...current,
+          outgoing: [body.invitation, ...current.outgoing.filter((item) => item.id !== body.invitation.id)],
+        }));
+        setInviteEmail("");
+        setInviteMessage(`${body.invitation.email} now has ${body.invitation.accessMode === "read-write" ? "read-write" : "read-only"} dashboard access.`);
+      })
+      .catch((err: Error) => setInviteMessage(err.message))
+      .finally(() => setInviteSaving(false));
+  }
+
+  function revokeWorkspaceInvite(invitation: WorkspaceInvitation) {
+    fetch(`${apiUrl}/api/workspace/invitations/${invitation.id}`, { method: "DELETE", credentials: "include" })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ detail: "Could not revoke invite" }));
+          throw new Error(body.detail ?? "Could not revoke invite");
+        }
+        return res.json();
+      })
+      .then(() => {
+        setWorkspaceInvites((current) => ({ ...current, outgoing: current.outgoing.filter((item) => item.id !== invitation.id) }));
+        setInviteMessage(`${invitation.email} access revoked.`);
+      })
+      .catch((err: Error) => setInviteMessage(err.message));
   }
 
   function logout() {
@@ -2010,7 +2089,7 @@ function App() {
                       <>
                         <button onClick={() => copyCommand(connectorCluster.installCommand, connectorCluster.clusterName)}><Copy size={16} /> {copied === connectorCluster.clusterName ? "Copied" : "Copy install"}</button>
                         <button onClick={verifyConnectorStatus} disabled={connectorVerifying}><CheckCircle2 size={16} /> {connectorVerifying ? "Verifying..." : "Verify status"}</button>
-                        <button className="danger" onClick={() => deleteConnectorCluster(connectorCluster)} disabled={deletingClusterId === connectorCluster.id}><Trash2 size={16} /> {deletingClusterId === connectorCluster.id ? "Deleting..." : "Delete cluster"}</button>
+                        {connectorCluster.canWrite !== false && <button className="danger" onClick={() => deleteConnectorCluster(connectorCluster)} disabled={deletingClusterId === connectorCluster.id}><Trash2 size={16} /> {deletingClusterId === connectorCluster.id ? "Deleting..." : "Delete cluster"}</button>}
                       </>
                     )}
                   </div>
@@ -2022,11 +2101,12 @@ function App() {
                       <article className="cluster-list-item" key={cluster.id}>
                         <div>
                           <strong>{cluster.clusterName}</strong>
-                          <small>{cluster.provider} · {cluster.environment} · {cluster.agentMode}</small>
+                          <small>{cluster.provider} · {cluster.environment} · {cluster.agentMode}{cluster.isOwner === false ? ` · shared by ${cluster.ownerEmail}` : ""}</small>
                         </div>
                         <em className={cluster.status === "connected" ? "connected" : "pending"}>{cluster.status}</em>
+                        <span className={`cluster-access ${cluster.canWrite === false ? "read" : "write"}`}>{cluster.isOwner ? "Owner" : cluster.accessMode === "read-write" ? "Read-write" : "Read-only"}</span>
                         <div className="cluster-list-actions">
-                          <button onClick={() => copyCommand(cluster.installCommand, cluster.clusterName)}><Copy size={15} /> {copied === cluster.clusterName ? "Copied" : "Install"}</button>
+                          {cluster.installCommand ? <button onClick={() => copyCommand(cluster.installCommand, cluster.clusterName)}><Copy size={15} /> {copied === cluster.clusterName ? "Copied" : "Install"}</button> : null}
                           <button onClick={() => {
                             setGeneratedConnectorCluster(cluster);
                             setConnectorClusterName(cluster.clusterName);
@@ -2045,12 +2125,50 @@ function App() {
                               .catch(() => setClusterRefreshMessage("Could not verify cluster."))
                               .finally(() => setConnectorVerifying(false));
                           }} disabled={connectorVerifying}><CheckCircle2 size={15} /> Verify</button>
-                          <button className="danger" onClick={() => deleteConnectorCluster(cluster)} disabled={deletingClusterId === cluster.id}><Trash2 size={15} /> {deletingClusterId === cluster.id ? "Deleting" : "Delete"}</button>
+                          {cluster.canWrite !== false && <button className="danger" onClick={() => deleteConnectorCluster(cluster)} disabled={deletingClusterId === cluster.id}><Trash2 size={15} /> {deletingClusterId === cluster.id ? "Deleting" : "Delete"}</button>}
                         </div>
                       </article>
                     ))}
                   </div>
                 ) : null}
+              </div>
+            </section>
+
+            <section className="panel workspace-share-panel">
+              <div className="panel-head"><div><span>Dashboard Sharing</span><h2>Invite users to your cluster dashboard</h2></div><UserPlus size={22} /></div>
+              <div className="share-grid">
+                <article className="share-form">
+                  <label>
+                    <span>Email address</span>
+                    <input value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="teammate@company.com" />
+                  </label>
+                  <label>
+                    <span>Access mode</span>
+                    <select value={inviteAccessMode} onChange={(event) => setInviteAccessMode(event.target.value)}>
+                      <option value="read">Read-only: view dashboards and cluster metrics</option>
+                      <option value="read-write">Read-write: verify and delete shared clusters</option>
+                    </select>
+                  </label>
+                  <button onClick={saveWorkspaceInvite} disabled={inviteSaving}><UserPlus size={16} /> {inviteSaving ? "Saving..." : "Invite user"}</button>
+                  {inviteMessage && <p>{inviteMessage}</p>}
+                </article>
+                <article className="share-list">
+                  <strong>Shared by you</strong>
+                  {workspaceInvites.outgoing.length ? workspaceInvites.outgoing.map((invite) => (
+                    <div key={invite.id}>
+                      <span>{invite.email}<small>{invite.accessMode === "read-write" ? "Read-write" : "Read-only"} · {invite.status}</small></span>
+                      <button onClick={() => revokeWorkspaceInvite(invite)}>Revoke</button>
+                    </div>
+                  )) : <small>No dashboard invitations yet.</small>}
+                </article>
+                <article className="share-list">
+                  <strong>Shared with you</strong>
+                  {workspaceInvites.incoming.length ? workspaceInvites.incoming.map((invite) => (
+                    <div key={invite.id}>
+                      <span>{invite.ownerEmail || "Workspace owner"}<small>{invite.accessMode === "read-write" ? "Read-write" : "Read-only"} access</small></span>
+                    </div>
+                  )) : <small>No shared workspaces yet.</small>}
+                </article>
               </div>
             </section>
             <section className="panel user-management k8s-network-panel">
