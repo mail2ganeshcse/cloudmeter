@@ -288,12 +288,13 @@ function CapacityRow({ label, value, unit, percent, tone = "normal" }: { label: 
   const width = percent === undefined ? 0 : Math.max(2, percent);
   return (
     <div className={`capacity-row ${tone}`}>
-      <span>{label}</span>
+      <div className="capacity-row-head">
+        <span>{label}</span>
+        <strong>{value}{unit && <small>{unit}</small>}{percent !== undefined && <b>{percent.toFixed(percent < 10 ? 1 : 0)}%</b>}</strong>
+      </div>
       <div className="capacity-bar" aria-hidden="true">
         {percent === undefined ? <em /> : <i style={{ width: `${width}%` }} />}
       </div>
-      <strong>{value}{unit && <small>{unit}</small>}</strong>
-      {percent !== undefined && <b>{percent.toFixed(percent < 10 ? 1 : 0)}%</b>}
     </div>
   );
 }

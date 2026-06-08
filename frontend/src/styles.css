@@ -2016,6 +2016,7 @@ h1 {
 }
 
 .compute-card {
+  overflow: hidden;
   padding: 16px;
   display: grid;
   gap: 14px;
@@ -2028,6 +2029,10 @@ h1 {
   justify-content: space-between;
   gap: 14px;
   align-items: flex-start;
+}
+
+.compute-card-head > div:first-child {
+  min-width: 0;
 }
 
 .compute-card-head strong,
@@ -2053,17 +2058,20 @@ h1 {
 }
 
 .compute-price {
+  min-width: 116px;
   flex: 0 0 auto;
   text-align: right;
 }
 
 .compute-price strong {
+  overflow-wrap: normal;
+  white-space: nowrap;
   color: #12724f;
 }
 
 .capacity-columns {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
   gap: 12px;
 }
 
@@ -2093,7 +2101,7 @@ h1 {
 .capacity-title {
   min-width: 0;
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, auto) minmax(0, 1fr);
   gap: 7px;
   align-items: center;
 }
@@ -2118,40 +2126,54 @@ h1 {
 
 .capacity-row {
   display: grid;
-  grid-template-columns: 76px minmax(72px, 1fr) minmax(74px, auto) 44px;
-  gap: 8px;
-  align-items: center;
+  gap: 6px;
+  min-width: 0;
   color: #52635d;
   font-size: 12px;
   font-weight: 850;
 }
 
-.capacity-row > span {
+.capacity-row-head {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.capacity-row-head > span {
   overflow-wrap: anywhere;
 }
 
-.capacity-row strong {
+.capacity-row-head strong {
+  max-width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 4px;
   color: #10201c;
   font-size: 12px;
   font-weight: 950;
   text-align: right;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
-.capacity-row strong small {
-  display: block;
+.capacity-row-head strong small {
   color: #66776f;
   font-size: 10px;
   font-weight: 850;
 }
 
-.capacity-row b {
+.capacity-row-head strong b {
+  margin-left: 4px;
   color: #60736b;
   font-size: 11px;
-  text-align: right;
+  font-weight: 900;
 }
 
 .capacity-bar {
+  width: 100%;
+  min-width: 0;
   height: 8px;
   border-radius: 99px;
   background: #e3ebe6;
@@ -3238,6 +3260,15 @@ td:last-child {
 
   .capacity-columns {
     grid-template-columns: 1fr;
+  }
+
+  .compute-card-head {
+    display: grid;
+  }
+
+  .compute-price {
+    min-width: 0;
+    text-align: left;
   }
 
   .model-access-card {
