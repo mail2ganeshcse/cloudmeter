@@ -1742,16 +1742,26 @@ h1 {
   align-items: start;
 }
 
+.costing-stack {
+  margin-top: 16px;
+  display: grid;
+  gap: 16px;
+}
+
 .k8s-cost-panel,
 .k8s-network-panel {
   overflow: hidden;
 }
 
+.k8s-cost-panel {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(247, 251, 249, 0.9));
+}
+
 .k8s-controls {
-  margin-bottom: 12px;
+  margin-bottom: 14px;
   display: grid;
   grid-template-columns: minmax(260px, 1.4fr) repeat(2, minmax(160px, 0.8fr)) minmax(150px, 0.65fr);
-  gap: 10px;
+  gap: 12px;
   align-items: end;
 }
 
@@ -1772,26 +1782,26 @@ h1 {
 
 .k8s-controls select {
   width: 100%;
-  min-height: 42px;
+  min-height: 44px;
   border: 1px solid #d8e3de;
   border-radius: 8px;
   padding: 0 10px;
   color: #10201c;
-  background: #ffffff;
+  background: linear-gradient(180deg, #ffffff, #f8fbf9);
   font-weight: 850;
 }
 
 .k8s-cost-total {
-  min-height: 42px;
-  padding: 8px 10px;
+  min-height: 44px;
+  padding: 9px 12px;
   border-radius: 8px;
   color: #10201c;
-  background: #e9fbf2;
+  background: linear-gradient(135deg, #dff8ec, #fff3cf);
   border: 1px solid rgba(18, 114, 79, 0.18);
 }
 
 .k8s-cost-total strong {
-  font-size: 18px;
+  font-size: 20px;
   line-height: 1;
 }
 
@@ -1832,17 +1842,27 @@ h1 {
 
 .k8s-table {
   min-width: 920px;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
 .k8s-table th {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: #f7fbf8;
+  color: #4c625a;
+  background: #eef7f2;
+  font-size: 11px;
+  letter-spacing: 0.04em;
 }
 
 .k8s-table td {
   vertical-align: top;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.k8s-table tbody tr:hover td {
+  background: #f7fcf9;
 }
 
 .k8s-table td:first-child,
@@ -1862,19 +1882,19 @@ h1 {
 
 .cell-title {
   color: #10201c;
-  font-weight: 900;
+  font-weight: 950;
 }
 
 .cell-detail {
   color: #465b53;
-  font-weight: 750;
+  font-weight: 800;
 }
 
 .metric-cell,
 .money-cell {
   white-space: nowrap;
   color: #10201c;
-  font-weight: 900;
+  font-weight: 950;
 }
 
 .metric-cell small {
@@ -1886,17 +1906,24 @@ h1 {
 }
 
 .k8s-owner-panel {
-  position: sticky;
-  top: 12px;
-  max-height: calc(100vh - 140px);
-  overflow: auto;
+  position: static;
+  max-height: none;
+  overflow: visible;
+}
+
+.owner-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .k8s-owner {
-  padding: 12px;
-  border: 1px solid rgba(16, 32, 28, 0.08);
+  min-height: 116px;
+  padding: 14px;
+  display: grid;
+  align-content: space-between;
+  border: 1px solid rgba(16, 32, 28, 0.09);
   border-radius: 8px;
-  background: #f8fbf9;
+  background: linear-gradient(135deg, #ffffff, #f4faf7);
+  box-shadow: 0 12px 28px rgba(16, 32, 28, 0.05);
 }
 
 .k8s-owner label {
@@ -1911,6 +1938,8 @@ h1 {
 .k8s-owner label strong {
   flex: 0 0 auto;
   white-space: nowrap;
+  color: #12724f;
+  font-size: 17px;
 }
 
 .k8s-network-panel {
@@ -2339,6 +2368,10 @@ td:last-child {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .owner-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .k8s-owner-panel {
     position: static;
     max-height: none;
@@ -2504,6 +2537,7 @@ td:last-child {
 
   .cockpit-strip,
   .kubernetes-health,
+  .owner-grid,
   .intelligence-grid,
   .pipeline-track,
   .command-grid {

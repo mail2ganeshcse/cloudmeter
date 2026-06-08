@@ -1498,7 +1498,7 @@ function App() {
               </article>
             </section>
 
-            <section className="kubernetes-layout">
+            <section className="costing-stack">
               <article className="panel wide k8s-cost-panel">
                 <div className="panel-head"><div><span>Kubernetes Costing</span><h2>Namespace and pod-level chargeback</h2></div><ServerCog size={22} /></div>
                 <div className="k8s-controls">
@@ -1565,7 +1565,7 @@ function App() {
               </article>
               <article className="panel k8s-owner-panel">
                 <div className="panel-head"><div><span>Chargeback</span><h2>Namespace owners</h2></div><Banknote size={22} /></div>
-                <div className="chargeback">
+                <div className="chargeback owner-grid">
                   {k8sChargeback.length ? k8sChargeback.map((item) => (
                     <div className="k8s-owner" key={`${item.cluster}-${item.namespace}`}>
                       <label>{item.namespace}<strong>{formatInr(item.amount)}</strong></label>
