@@ -49,6 +49,7 @@ app.add_middleware(
 def startup() -> None:
     Base.metadata.create_all(bind=engine)
     ensure_user_account_columns()
+    ensure_owner_columns()
     with SessionLocal() as db:
         seed_if_empty(db)
 
@@ -84,7 +85,6 @@ class UserRoleUpdateRequest(BaseModel):
 
 
 class ClusterCreateRequest(BaseModel):
-    customer_id: int
     cluster_name: str
     provider: str
     environment: str = "Production"
@@ -177,6 +177,22 @@ def onboarding_cluster_payload(cluster: ClusterConnection) -> dict[str, Any]:
     }
 
 
+def workspace_customer_for_user(user: UserAccount, db: Session) -> Customer:
+    customer_name = f"{user.email} workspace"
+    customer = db.query(Customer).filter(Customer.name == customer_name).first()
+    if customer:
+        return customer
+    customer = Customer(
+        name=customer_name,
+        segment="Workspace",
+        region=user.hosted_domain or "Private",
+        billing_model="User-owned cloud and Kubernetes billing",
+    )
+    db.add(customer)
+    db.flush()
+    return customer
+
+
 def token_hash(token: str) -> str:
     return sha256(token.encode("utf-8")).hexdigest()
 
@@ -201,6 +217,22 @@ def ensure_user_account_columns() -> None:
     with engine.begin() as connection:
         for column, statement in ddl.items():
             if column not in existing:
+                connection.execute(text(statement))
+
+
+def ensure_owner_columns() -> None:
+    inspector = inspect(engine)
+    table_columns = {
+        "cluster_connections": "ALTER TABLE cluster_connections ADD COLUMN owner_user_id INTEGER DEFAULT 0",
+        "kubernetes_costs": "ALTER TABLE kubernetes_costs ADD COLUMN owner_user_id INTEGER DEFAULT 0",
+        "network_usage": "ALTER TABLE network_usage ADD COLUMN owner_user_id INTEGER DEFAULT 0",
+    }
+    with engine.begin() as connection:
+        for table, statement in table_columns.items():
+            if not inspector.has_table(table):
+                continue
+            existing = {column["name"] for column in inspector.get_columns(table)}
+            if "owner_user_id" not in existing:
                 connection.execute(text(statement))
 
 
@@ -724,10 +756,11 @@ def update_user_role(user_id: int, payload: UserRoleUpdateRequest, request: Requ
 
 
 @app.get("/api/onboarding")
-def onboarding(db: Session = Depends(get_db)) -> dict[str, Any]:
+def onboarding(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user, _ = current_user_from_cookie(request, db)
     clusters = (
         db.query(ClusterConnection)
-        .filter(~ClusterConnection.token.like("%_demo"))
+        .filter(ClusterConnection.owner_user_id == user.id, ~ClusterConnection.token.like("%_demo"))
         .order_by(ClusterConnection.id.desc())
         .all()
     )
@@ -745,9 +778,12 @@ def onboarding(db: Session = Depends(get_db)) -> dict[str, Any]:
 
 
 @app.post("/api/onboarding/clusters")
-def create_cluster(payload: ClusterCreateRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
+def create_cluster(payload: ClusterCreateRequest, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user, _ = current_user_from_cookie(request, db)
+    customer = workspace_customer_for_user(user, db)
     cluster = ClusterConnection(
-        customer_id=payload.customer_id,
+        customer_id=customer.id,
+        owner_user_id=user.id,
         cluster_name=payload.cluster_name,
         provider=payload.provider,
         environment=payload.environment,
@@ -761,8 +797,9 @@ def create_cluster(payload: ClusterCreateRequest, db: Session = Depends(get_db))
 
 
 @app.post("/api/onboarding/clusters/{cluster_id}/verify")
-def verify_cluster(cluster_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
-    cluster = db.query(ClusterConnection).filter(ClusterConnection.id == cluster_id).first()
+def verify_cluster(cluster_id: int, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user, _ = current_user_from_cookie(request, db)
+    cluster = db.query(ClusterConnection).filter(ClusterConnection.id == cluster_id, ClusterConnection.owner_user_id == user.id).first()
     if not cluster:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cluster setup not found")
     connected = cluster.status == "connected" and bool(cluster.last_seen)
@@ -777,19 +814,7 @@ def verify_cluster(cluster_id: int, db: Session = Depends(get_db)) -> dict[str, 
 def agent_heartbeat(payload: AgentHeartbeatRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
     cluster = db.query(ClusterConnection).filter(ClusterConnection.token == payload.token).first()
     if not cluster:
-        first_customer = db.query(Customer).order_by(Customer.id).first()
-        if not first_customer:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No customer available for cluster registration")
-        cluster = ClusterConnection(
-            customer_id=first_customer.id,
-            cluster_name=payload.cluster_name,
-            provider=payload.provider,
-            environment="Discovered",
-            token=payload.token,
-            status="connected",
-            last_seen=datetime.now(UTC).isoformat(),
-        )
-        db.add(cluster)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cluster token is not registered")
     else:
         cluster.cluster_name = payload.cluster_name or cluster.cluster_name
         cluster.provider = payload.provider or cluster.provider
@@ -813,27 +838,14 @@ def agent_heartbeat(payload: AgentHeartbeatRequest, db: Session = Depends(get_db
 def agent_snapshot(payload: AgentSnapshotRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
     cluster = db.query(ClusterConnection).filter(ClusterConnection.token == payload.token).first()
     if not cluster:
-        first_customer = db.query(Customer).order_by(Customer.id).first()
-        if not first_customer:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No customer available for cluster registration")
-        cluster = ClusterConnection(
-            customer_id=first_customer.id,
-            cluster_name=payload.cluster_name,
-            provider=payload.provider,
-            environment="Discovered",
-            token=payload.token,
-            status="connected",
-            last_seen=datetime.now(UTC).isoformat(),
-        )
-        db.add(cluster)
-        db.flush()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cluster token is not registered")
 
     cluster.cluster_name = payload.cluster_name or cluster.cluster_name
     cluster.provider = payload.provider or cluster.provider
     cluster.status = "connected"
     cluster.last_seen = datetime.now(UTC).isoformat()
 
-    db.query(KubernetesCost).filter(KubernetesCost.cluster == cluster.cluster_name).delete()
+    db.query(KubernetesCost).filter(KubernetesCost.cluster == cluster.cluster_name, KubernetesCost.owner_user_id == cluster.owner_user_id).delete()
     month = datetime.now(UTC).strftime("%Y-%m")
     rows_created = 0
     for pod in payload.pods:
@@ -845,6 +857,7 @@ def agent_snapshot(payload: AgentSnapshotRequest, db: Session = Depends(get_db))
         db.add(
             KubernetesCost(
                 customer_id=cluster.customer_id,
+                owner_user_id=cluster.owner_user_id,
                 cluster=cluster.cluster_name,
                 namespace=pod.namespace,
                 workload=f"pod/{pod.pod}",
@@ -868,6 +881,7 @@ def agent_snapshot(payload: AgentSnapshotRequest, db: Session = Depends(get_db))
             db.add(
                 KubernetesCost(
                     customer_id=cluster.customer_id,
+                    owner_user_id=cluster.owner_user_id,
                     cluster=cluster.cluster_name,
                     namespace=namespace.namespace,
                     workload=f"{namespace.pods} live pods",
@@ -885,6 +899,7 @@ def agent_snapshot(payload: AgentSnapshotRequest, db: Session = Depends(get_db))
         db.add(
             KubernetesCost(
                 customer_id=cluster.customer_id,
+                owner_user_id=cluster.owner_user_id,
                 cluster=cluster.cluster_name,
                 namespace="cluster-summary",
                 workload=f"{payload.pod_count} live pods",
@@ -919,24 +934,11 @@ def agent_snapshot(payload: AgentSnapshotRequest, db: Session = Depends(get_db))
 def agent_network(payload: AgentNetworkRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
     cluster = db.query(ClusterConnection).filter(ClusterConnection.token == payload.token).first()
     if not cluster:
-        first_customer = db.query(Customer).order_by(Customer.id).first()
-        if not first_customer:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No customer available for network registration")
-        cluster = ClusterConnection(
-            customer_id=first_customer.id,
-            cluster_name=payload.cluster_name,
-            provider=payload.provider,
-            environment="Discovered",
-            token=payload.token,
-            status="connected",
-            last_seen=datetime.now(UTC).isoformat(),
-        )
-        db.add(cluster)
-        db.flush()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cluster token is not registered")
 
     cluster.status = "connected"
     cluster.last_seen = datetime.now(UTC).isoformat()
-    db.query(NetworkUsage).filter(NetworkUsage.cluster == cluster.cluster_name).delete()
+    db.query(NetworkUsage).filter(NetworkUsage.cluster == cluster.cluster_name, NetworkUsage.owner_user_id == cluster.owner_user_id).delete()
     observed_at = datetime.now(UTC)
     rows_created = 0
     for metric in payload.metrics:
@@ -945,6 +947,7 @@ def agent_network(payload: AgentNetworkRequest, db: Session = Depends(get_db)) -
         db.add(
             NetworkUsage(
                 customer_id=cluster.customer_id,
+                owner_user_id=cluster.owner_user_id,
                 cluster=cluster.cluster_name,
                 namespace=metric.namespace,
                 workload=metric.workload or "namespace",
@@ -1401,7 +1404,8 @@ echo "Network agent: kubectl get pods -n cloudmeter-agent -l app.kubernetes.io/n
 
 
 @app.get("/api/dashboard")
-def dashboard(db: Session = Depends(get_db)) -> dict[str, Any]:
+def dashboard(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user, _ = current_user_from_cookie(request, db)
     customers = db.query(Customer).order_by(Customer.name).all()
     cloud_total = money(db.query(func.sum(CloudSpend.amount_inr)).scalar())
     ai_total = money(db.query(func.sum(AiUsage.amount_inr)).scalar())
@@ -1409,8 +1413,11 @@ def dashboard(db: Session = Depends(get_db)) -> dict[str, Any]:
     tokens = money(db.query(func.sum(AiUsage.tokens)).scalar())
     requests = money(db.query(func.sum(AiUsage.requests)).scalar())
     gpu_seconds = money(db.query(func.sum(AiUsage.gpu_seconds)).scalar())
-    clusters_by_name = {cluster.cluster_name: cluster for cluster in db.query(ClusterConnection).all()}
-    all_kubernetes_rows = db.query(KubernetesCost).all()
+    clusters_by_name = {
+        cluster.cluster_name: cluster
+        for cluster in db.query(ClusterConnection).filter(ClusterConnection.owner_user_id == user.id).all()
+    }
+    all_kubernetes_rows = db.query(KubernetesCost).filter(KubernetesCost.owner_user_id == user.id).all()
     def is_live_cluster(cluster_name: str) -> bool:
         cluster = clusters_by_name.get(cluster_name)
         return bool(cluster and cluster.status == "connected" and "T" in cluster.last_seen)
@@ -1427,7 +1434,12 @@ def dashboard(db: Session = Depends(get_db)) -> dict[str, Any]:
     provider_rows = db.query(CloudSpend.provider, func.sum(CloudSpend.amount_inr)).group_by(CloudSpend.provider).all()
     ai_rows = db.query(AiUsage.provider, func.sum(AiUsage.amount_inr), func.sum(AiUsage.tokens), func.sum(AiUsage.requests)).group_by(AiUsage.provider).all()
     ai_usage = db.query(AiUsage).order_by(AiUsage.amount_inr.desc()).all()
-    network_usage = db.query(NetworkUsage).order_by((NetworkUsage.rx_bytes_per_sec + NetworkUsage.tx_bytes_per_sec).desc()).all()
+    network_usage = (
+        db.query(NetworkUsage)
+        .filter(NetworkUsage.owner_user_id == user.id)
+        .order_by((NetworkUsage.rx_bytes_per_sec + NetworkUsage.tx_bytes_per_sec).desc())
+        .all()
+    )
     invoices = db.query(Invoice).order_by(Invoice.total_inr.desc()).all()
     alerts = db.query(BudgetAlert).order_by(BudgetAlert.current_inr.desc()).all()
 

@@ -432,7 +432,7 @@ function SetupWizard({ session, onboarding, onUpdate }: { session: Session; onbo
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ customer_id: 1, cluster_name: clusterName, provider: clusterProvider, environment: "Kubernetes" }),
+      body: JSON.stringify({ cluster_name: clusterName, provider: clusterProvider, environment: "Kubernetes" }),
     })
       .then(async (res) => {
         if (!res.ok) {
@@ -652,15 +652,21 @@ function App() {
         }
       })
       .finally(() => setAuthLoading(false));
-    fetch(`${apiUrl}/api/dashboard`)
-      .then((res) => res.json())
+  }, []);
+
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+    fetch(`${apiUrl}/api/dashboard`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then(setData)
       .catch(() => setData(fallback));
-    fetch(`${apiUrl}/api/onboarding`)
-      .then((res) => res.json())
+    fetch(`${apiUrl}/api/onboarding`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then(setOnboarding)
       .catch(() => setOnboarding(null));
-  }, []);
+  }, [session?.user.id]);
 
   const maxProvider = useMemo(() => Math.max(...data.cloudProviders.map((p) => p.amount), 1), [data.cloudProviders]);
   const maxAi = useMemo(() => Math.max(...data.aiProviders.map((p) => p.amount), 1), [data.aiProviders]);
@@ -777,7 +783,7 @@ function App() {
   }
 
   function refreshClusterStatus(clusterName?: string) {
-    fetch(`${apiUrl}/api/onboarding`)
+    fetch(`${apiUrl}/api/onboarding`, { credentials: "include" })
       .then((res) => res.json())
       .then((freshOnboarding) => {
         setOnboarding(freshOnboarding);
@@ -805,7 +811,7 @@ function App() {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ customer_id: 1, cluster_name: cleanName, provider: "Any cloud / On-prem", environment: "Kubernetes" }),
+      body: JSON.stringify({ cluster_name: cleanName, provider: "Any cloud / On-prem", environment: "Kubernetes" }),
     })
       .then(async (res) => {
         if (!res.ok) {
@@ -843,7 +849,7 @@ function App() {
         setOnboarding((current) => current ? { ...current, clusters: [body.cluster, ...current.clusters.filter((item) => item.id !== body.cluster.id)] } : current);
         if (body.verified) {
           setVerifiedConnectorCluster(body.cluster);
-          fetch(`${apiUrl}/api/dashboard`).then((res) => res.json()).then(setData).catch(() => undefined);
+          fetch(`${apiUrl}/api/dashboard`, { credentials: "include" }).then((res) => res.json()).then(setData).catch(() => undefined);
         } else {
           setVerifiedConnectorCluster(null);
         }

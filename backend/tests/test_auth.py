@@ -61,6 +61,13 @@ def google_claims(email="user@gmail.com", sub="google-sub-1", verified=True):
     }
 
 
+def login_as(client, monkeypatch, email: str, sub: str):
+    monkeypatch.setattr("app.main.id_token.verify_oauth2_token", lambda *args: google_claims(email=email, sub=sub))
+    response = client.post("/api/auth/google", json={"credential": "header.payload.signature"})
+    assert response.status_code == 200
+    return response.json()
+
+
 def test_google_login_creates_user_session_and_cookie(client, db_session, monkeypatch):
     monkeypatch.setattr("app.main.id_token.verify_oauth2_token", lambda *args: google_claims())
 
@@ -353,45 +360,41 @@ def test_agent_install_script_uses_valid_shell_json(client):
     assert "CLOUDMETER_PROMETHEUS_URL" in script
 
 
-def test_cluster_verify_reports_connected_status(client, db_session):
-    customer = Customer(name="Verify Co", segment="SaaS", region="India", billing_model="K8s")
-    db_session.add(customer)
-    db_session.flush()
-    cluster = ClusterConnection(
-        customer_id=customer.id,
-        cluster_name="verify-cluster",
-        provider="Any cloud / On-prem",
-        environment="Kubernetes",
-        token="cm_verify_cluster",
-        status="pending",
-        last_seen="Install command not run",
+def test_cluster_verify_reports_connected_status(client, db_session, monkeypatch):
+    login_as(client, monkeypatch, "owner@gmail.com", "owner-sub")
+    created = client.post(
+        "/api/onboarding/clusters",
+        json={"cluster_name": "verify-cluster", "provider": "Any cloud / On-prem", "environment": "Kubernetes"},
     )
-    db_session.add(cluster)
-    db_session.commit()
-    db_session.refresh(cluster)
+    assert created.status_code == 200
+    cluster_id = created.json()["id"]
+    token = db_session.query(ClusterConnection).filter(ClusterConnection.id == cluster_id).first().token
 
-    pending = client.post(f"/api/onboarding/clusters/{cluster.id}/verify")
+    pending = client.post(f"/api/onboarding/clusters/{cluster_id}/verify")
     assert pending.status_code == 200
     assert pending.json()["verified"] is False
 
     heartbeat = client.post(
         "/api/agent/heartbeat",
-        json={"token": "cm_verify_cluster", "cluster_name": "verify-cluster", "provider": "Any cloud / On-prem", "status": "connected"},
+        json={"token": token, "cluster_name": "verify-cluster", "provider": "Any cloud / On-prem", "status": "connected"},
     )
     assert heartbeat.status_code == 200
-    connected = client.post(f"/api/onboarding/clusters/{cluster.id}/verify")
+    connected = client.post(f"/api/onboarding/clusters/{cluster_id}/verify")
     assert connected.status_code == 200
     assert connected.json()["verified"] is True
     assert connected.json()["cluster"]["clusterName"] == "verify-cluster"
 
 
-def test_agent_snapshot_replaces_cluster_demo_rows(client, db_session):
+def test_agent_snapshot_replaces_cluster_demo_rows(client, db_session, monkeypatch):
+    login_as(client, monkeypatch, "owner@gmail.com", "owner-sub")
     customer = Customer(name="Snapshot Co", segment="SaaS", region="India", billing_model="K8s")
     db_session.add(customer)
     db_session.flush()
+    owner = db_session.query(UserAccount).filter(UserAccount.email == "owner@gmail.com").first()
     db_session.add(
         ClusterConnection(
             customer_id=customer.id,
+            owner_user_id=owner.id,
             cluster_name="real-cluster",
             provider="Anywhere",
             environment="Production",
@@ -402,6 +405,7 @@ def test_agent_snapshot_replaces_cluster_demo_rows(client, db_session):
     db_session.add(
         KubernetesCost(
             customer_id=customer.id,
+            owner_user_id=owner.id,
             cluster="real-cluster",
             namespace="demo",
             workload="old-demo",
@@ -448,13 +452,16 @@ def test_agent_snapshot_replaces_cluster_demo_rows(client, db_session):
     assert all(row["workload"].startswith("pod/") for row in real_rows)
 
 
-def test_agent_network_ingestion_updates_dashboard(client, db_session):
+def test_agent_network_ingestion_updates_dashboard(client, db_session, monkeypatch):
+    login_as(client, monkeypatch, "network-owner@gmail.com", "network-owner-sub")
     customer = Customer(name="Network Co", segment="SaaS", region="India", billing_model="Network")
     db_session.add(customer)
     db_session.flush()
+    owner = db_session.query(UserAccount).filter(UserAccount.email == "network-owner@gmail.com").first()
     db_session.add(
         ClusterConnection(
             customer_id=customer.id,
+            owner_user_id=owner.id,
             cluster_name="network-cluster",
             provider="Anywhere",
             environment="Production",
@@ -483,3 +490,37 @@ def test_agent_network_ingestion_updates_dashboard(client, db_session):
     dashboard = client.get("/api/dashboard")
     network_rows = [item for item in dashboard.json()["networkUsage"] if item["cluster"] == "network-cluster"]
     assert network_rows[0]["source"] == "prometheus"
+
+
+def test_cluster_data_is_isolated_between_google_users(client, db_session, monkeypatch):
+    login_as(client, monkeypatch, "owner@gmail.com", "owner-sub")
+    created = client.post(
+        "/api/onboarding/clusters",
+        json={"cluster_name": "private-cluster", "provider": "Any cloud / On-prem", "environment": "Kubernetes"},
+    )
+    assert created.status_code == 200
+    owner_cluster = db_session.query(ClusterConnection).filter(ClusterConnection.cluster_name == "private-cluster").first()
+    assert owner_cluster.owner_user_id > 0
+
+    snapshot = client.post(
+        "/api/agent/snapshot",
+        json={
+            "token": owner_cluster.token,
+            "cluster_name": "private-cluster",
+            "provider": "Any cloud / On-prem",
+            "pod_count": 1,
+            "pods": [{"namespace": "private-ns", "pod": "api", "cpu_millicores": 100, "memory_mib": 128}],
+        },
+    )
+    assert snapshot.status_code == 200
+    owner_dashboard = client.get("/api/dashboard")
+    assert any(row["cluster"] == "private-cluster" for row in owner_dashboard.json()["kubernetes"])
+    client.post("/api/auth/logout")
+
+    login_as(client, monkeypatch, "other@gmail.com", "other-sub")
+    other_onboarding = client.get("/api/onboarding")
+    assert other_onboarding.status_code == 200
+    assert other_onboarding.json()["clusters"] == []
+    other_dashboard = client.get("/api/dashboard")
+    assert other_dashboard.status_code == 200
+    assert all(row["cluster"] != "private-cluster" for row in other_dashboard.json()["kubernetes"])

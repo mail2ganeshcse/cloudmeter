@@ -34,6 +34,7 @@ class KubernetesCost(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     customer_id: Mapped[int] = mapped_column(Integer, index=True)
+    owner_user_id: Mapped[int] = mapped_column(Integer, default=0, index=True)
     cluster: Mapped[str] = mapped_column(String(80))
     namespace: Mapped[str] = mapped_column(String(80))
     workload: Mapped[str] = mapped_column(String(120))
@@ -50,6 +51,7 @@ class NetworkUsage(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     customer_id: Mapped[int] = mapped_column(Integer, index=True)
+    owner_user_id: Mapped[int] = mapped_column(Integer, default=0, index=True)
     cluster: Mapped[str] = mapped_column(String(120), index=True)
     namespace: Mapped[str] = mapped_column(String(80))
     workload: Mapped[str] = mapped_column(String(120))
@@ -110,6 +112,7 @@ class ClusterConnection(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     customer_id: Mapped[int] = mapped_column(Integer, index=True)
+    owner_user_id: Mapped[int] = mapped_column(Integer, default=0, index=True)
     cluster_name: Mapped[str] = mapped_column(String(120))
     provider: Mapped[str] = mapped_column(String(40))
     environment: Mapped[str] = mapped_column(String(40))
