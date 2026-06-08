@@ -1,3 +1,5 @@
+import base64
+import json
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from hashlib import pbkdf2_hmac, sha256
@@ -22,6 +24,7 @@ from pydantic import BaseModel
 from .models import (
     AiUsage,
     BudgetAlert,
+    CloudIntegration,
     CloudSpend,
     ClusterConnection,
     ClusterNodeInventory,
@@ -92,6 +95,40 @@ def estimate_node_hourly_inr(instance_type: str, cpu_allocatable: float, memory_
     return round((cpu_allocatable * 2.8) + (memory_gib * 0.35), 2)
 
 
+def cloud_secret_key() -> bytes:
+    material = settings.cloud_credentials_secret or settings.database_url or settings.session_cookie_name
+    return sha256(material.encode("utf-8")).digest()
+
+
+def protect_cloud_credentials(payload: dict[str, str]) -> str:
+    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    key = cloud_secret_key()
+    encrypted = bytes(value ^ key[index % len(key)] for index, value in enumerate(raw))
+    return base64.urlsafe_b64encode(encrypted).decode("ascii")
+
+
+def credential_hint(payload: dict[str, str]) -> str:
+    for key in ("access_key", "client_id", "account_id", "tenant_id", "project_id"):
+        value = (payload.get(key) or "").strip()
+        if value:
+            return f"{value[:4]}...{value[-4:]}" if len(value) > 8 else value
+    return "stored"
+
+
+def cloud_integration_payload(integration: CloudIntegration) -> dict[str, Any]:
+    return {
+        "id": integration.id,
+        "provider": integration.provider,
+        "displayName": integration.display_name,
+        "accountId": integration.account_id,
+        "region": integration.region,
+        "billingSource": integration.billing_source,
+        "credentialHint": integration.credential_hint,
+        "status": integration.status,
+        "lastCheckedAt": integration.last_checked_at.isoformat(),
+    }
+
+
 class GoogleLoginRequest(BaseModel):
     credential: str
     username: str | None = None
@@ -116,6 +153,20 @@ class ProfileSetupRequest(BaseModel):
 
 class UserRoleUpdateRequest(BaseModel):
     role: str
+
+
+class CloudIntegrationRequest(BaseModel):
+    provider: str
+    display_name: str = ""
+    account_id: str = ""
+    region: str = ""
+    billing_source: str = ""
+    access_key: str = ""
+    secret_key: str = ""
+    tenant_id: str = ""
+    client_id: str = ""
+    private_key: str = ""
+    service_account_json: str = ""
 
 
 class ClusterCreateRequest(BaseModel):
@@ -797,6 +848,64 @@ def update_user_role(user_id: int, payload: UserRoleUpdateRequest, request: Requ
         .all()
     }
     return {"user": managed_user_payload(target, sessions_by_user)}
+
+
+@app.get("/api/cloud/integrations")
+def cloud_integrations(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user, _ = current_user_from_cookie(request, db)
+    rows = (
+        db.query(CloudIntegration)
+        .filter(CloudIntegration.owner_user_id == user.id)
+        .order_by(CloudIntegration.updated_at.desc())
+        .all()
+    )
+    return {"integrations": [cloud_integration_payload(row) for row in rows]}
+
+
+@app.post("/api/cloud/integrations")
+def create_cloud_integration(payload: CloudIntegrationRequest, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user, _ = current_user_from_cookie(request, db)
+    provider = payload.provider.strip().upper()
+    if provider not in {"AWS", "GCP", "OCI", "AZURE"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Provider must be AWS, GCP, OCI, or Azure")
+
+    credentials = {
+        "access_key": payload.access_key.strip(),
+        "secret_key": payload.secret_key.strip(),
+        "tenant_id": payload.tenant_id.strip(),
+        "client_id": payload.client_id.strip(),
+        "private_key": payload.private_key.strip(),
+        "service_account_json": payload.service_account_json.strip(),
+        "account_id": payload.account_id.strip(),
+        "region": payload.region.strip(),
+        "billing_source": payload.billing_source.strip(),
+    }
+    has_secret = any(credentials[key] for key in ("secret_key", "private_key", "service_account_json"))
+    has_identifier = any(credentials[key] for key in ("access_key", "client_id", "account_id", "tenant_id"))
+    if not has_secret or not has_identifier:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Add the provider account identifier and secret material")
+
+    customer = workspace_customer_for_user(user, db)
+    now = datetime.now(UTC)
+    integration = CloudIntegration(
+        customer_id=customer.id,
+        owner_user_id=user.id,
+        provider=provider,
+        display_name=payload.display_name.strip() or f"{provider} billing connector",
+        account_id=payload.account_id.strip(),
+        region=payload.region.strip() or "global",
+        billing_source=payload.billing_source.strip(),
+        credential_hint=credential_hint(credentials),
+        credential_blob=protect_cloud_credentials(credentials),
+        status="configured",
+        last_checked_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(integration)
+    db.commit()
+    db.refresh(integration)
+    return {"integration": cloud_integration_payload(integration)}
 
 
 @app.get("/api/onboarding")
@@ -1531,6 +1640,12 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]
         .order_by(ClusterNodeInventory.cluster, ClusterNodeInventory.node_name)
         .all()
     )
+    cloud_integrations_rows = (
+        db.query(CloudIntegration)
+        .filter(CloudIntegration.owner_user_id == user.id)
+        .order_by(CloudIntegration.updated_at.desc())
+        .all()
+    )
     invoices = db.query(Invoice).order_by(Invoice.total_inr.desc()).all()
     alerts = db.query(BudgetAlert).order_by(BudgetAlert.current_inr.desc()).all()
 
@@ -1562,6 +1677,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]
             for c in customers
         ],
         "cloudProviders": [{"name": row[0], "amount": money(row[1])} for row in provider_rows],
+        "cloudIntegrations": [cloud_integration_payload(row) for row in cloud_integrations_rows],
         "aiProviders": [{"name": row[0], "amount": money(row[1]), "tokens": money(row[2]), "requests": money(row[3])} for row in ai_rows],
         "teamChargeback": [{"team": team, "amount": money(amount)} for team, amount in sorted(chargeback.items(), key=lambda x: x[1], reverse=True)],
         "kubernetes": [

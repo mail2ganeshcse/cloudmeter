@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import ClusterConnection, Customer, KubernetesCost, NetworkUsage, UserAccount, UserSession
+from app.models import CloudIntegration, ClusterConnection, Customer, KubernetesCost, NetworkUsage, UserAccount, UserSession
 from app.settings import settings
 
 
@@ -490,6 +490,37 @@ def test_agent_network_ingestion_updates_dashboard(client, db_session, monkeypat
     dashboard = client.get("/api/dashboard")
     network_rows = [item for item in dashboard.json()["networkUsage"] if item["cluster"] == "network-cluster"]
     assert network_rows[0]["source"] == "prometheus"
+
+
+def test_cloud_integration_saves_masked_credentials(client, db_session, monkeypatch):
+    login_as(client, monkeypatch, "cloud-owner@gmail.com", "cloud-owner-sub")
+    response = client.post(
+        "/api/cloud/integrations",
+        json={
+            "provider": "AWS",
+            "display_name": "AWS prod billing",
+            "account_id": "123456789012",
+            "region": "ap-south-1",
+            "billing_source": "s3://cur-bucket/report",
+            "access_key": "AKIA1234567890",
+            "secret_key": "super-secret-key",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()["integration"]
+    assert body["provider"] == "AWS"
+    assert body["credentialHint"] == "AKIA...7890"
+    assert "super-secret-key" not in str(body)
+
+    integration = db_session.query(CloudIntegration).first()
+    assert integration.owner_user_id > 0
+    assert integration.credential_blob
+    assert "super-secret-key" not in integration.credential_blob
+
+    dashboard = client.get("/api/dashboard")
+    assert dashboard.status_code == 200
+    assert dashboard.json()["cloudIntegrations"][0]["displayName"] == "AWS prod billing"
+    assert "super-secret-key" not in str(dashboard.json())
 
 
 def test_cluster_data_is_isolated_between_google_users(client, db_session, monkeypatch):

@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     session_cookie_name: str = "cloudmeter_session"
     session_ttl_days: int = 7
     session_cookie_secure: bool = False
+    cloud_credentials_secret: str = ""
     public_api_url: str = "http://localhost:8001"
     frontend_url: str = "http://localhost:5173"
 

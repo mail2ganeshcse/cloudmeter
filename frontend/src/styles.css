@@ -1084,6 +1084,137 @@ input {
   background: #f2f7f3;
 }
 
+.provider-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.provider-tabs button {
+  min-height: 38px;
+  border: 1px solid #d8e3de;
+  border-radius: 8px;
+  color: #40564f;
+  background: #ffffff;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.provider-tabs button.active {
+  color: #10201c;
+  border-color: rgba(18, 114, 79, 0.28);
+  background: #dff8ec;
+}
+
+.cloud-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.cloud-form label {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.cloud-form span {
+  color: #60736b;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.cloud-form input,
+.cloud-form textarea {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #d8e3de;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #10201c;
+  background: #ffffff;
+  font-weight: 800;
+  outline: 0;
+}
+
+.cloud-form textarea {
+  min-height: 96px;
+  padding: 10px;
+  resize: vertical;
+  grid-column: span 2;
+  font-family: inherit;
+}
+
+.cloud-form-actions {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.cloud-form-actions button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #10201c;
+  background: #9cedc8;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.cloud-form-actions button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.cloud-form-actions small {
+  color: #65766f;
+  line-height: 1.4;
+}
+
+.cloud-connection-list {
+  display: grid;
+  gap: 10px;
+}
+
+.cloud-connection {
+  min-height: 64px;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border-radius: 8px;
+  background: #f7faf8;
+  border: 1px solid rgba(16, 32, 28, 0.08);
+}
+
+.cloud-connection strong,
+.cloud-connection small {
+  display: block;
+}
+
+.cloud-connection small {
+  margin-top: 3px;
+  color: #64776f;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.cloud-connection em {
+  padding: 4px 8px;
+  border-radius: 99px;
+  color: #173c30;
+  background: #dff8ec;
+  font-style: normal;
+  font-weight: 900;
+}
+
 .page-panel {
   margin-top: 16px;
 }
@@ -2336,7 +2467,17 @@ td:last-child {
   .provider-options,
   .cloud-grid,
   .db-grid,
+  .provider-tabs,
+  .cloud-form,
   .phone-row {
+    grid-template-columns: 1fr;
+  }
+
+  .cloud-form textarea {
+    grid-column: auto;
+  }
+
+  .cloud-connection {
     grid-template-columns: 1fr;
   }
 

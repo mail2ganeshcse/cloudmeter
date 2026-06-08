@@ -41,6 +41,7 @@ type Dashboard = {
   metrics: Record<string, number>;
   customers: Array<Record<string, string | number>>;
   cloudProviders: Array<{ name: string; amount: number }>;
+  cloudIntegrations: Array<Record<string, string | number>>;
   aiProviders: Array<{ name: string; amount: number; tokens: number; requests: number }>;
   teamChargeback: Array<{ team: string; amount: number }>;
   kubernetes: Array<Record<string, string | number>>;
@@ -168,6 +169,7 @@ const fallback: Dashboard = {
     { name: "GCP", amount: 473000 },
     { name: "OCI", amount: 507000 },
   ],
+  cloudIntegrations: [],
   aiProviders: [
     { name: "OpenAI", amount: 621000, tokens: 209200000, requests: 882000 },
     { name: "Claude", amount: 203000, tokens: 63200000, requests: 187000 },
@@ -687,6 +689,10 @@ function App() {
   const [k8sCostBasis, setK8sCostBasis] = useState("all");
   const [k8sClusterFilter, setK8sClusterFilter] = useState("all");
   const [k8sNamespaceFilter, setK8sNamespaceFilter] = useState("all");
+  const [cloudProviderSetup, setCloudProviderSetup] = useState("AWS");
+  const [cloudForm, setCloudForm] = useState<Record<string, string>>({});
+  const [cloudSaving, setCloudSaving] = useState(false);
+  const [cloudMessage, setCloudMessage] = useState("");
   const [copied, setCopied] = useState("");
   const [authLoading, setAuthLoading] = useState(true);
   const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
@@ -869,6 +875,40 @@ function App() {
     { label: "Connect cluster", detail: "Generate a read-only agent script", icon: Boxes, view: "Kubernetes" },
     { label: "Review AI meter", detail: "Inspect token and GPU usage", icon: Brain, view: "AI Metering" },
   ];
+  const cloudSetupFields: Record<string, Array<{ name: string; label: string; placeholder: string; secret?: boolean }>> = {
+    AWS: [
+      { name: "display_name", label: "Connector name", placeholder: "AWS production billing" },
+      { name: "account_id", label: "Account ID", placeholder: "123456789012" },
+      { name: "region", label: "Billing region", placeholder: "ap-south-1" },
+      { name: "billing_source", label: "CUR/S3 bucket", placeholder: "s3://company-cur-bucket/report" },
+      { name: "access_key", label: "Access key", placeholder: "AKIA..." },
+      { name: "secret_key", label: "Secret key", placeholder: "AWS secret access key", secret: true },
+    ],
+    GCP: [
+      { name: "display_name", label: "Connector name", placeholder: "GCP billing export" },
+      { name: "account_id", label: "Project ID", placeholder: "billing-project" },
+      { name: "region", label: "Location", placeholder: "asia-south1" },
+      { name: "billing_source", label: "BigQuery export", placeholder: "project.dataset.gcp_billing_export" },
+      { name: "client_id", label: "Client email / ID", placeholder: "service-account@project.iam.gserviceaccount.com" },
+      { name: "service_account_json", label: "Service account JSON", placeholder: "Paste service account JSON", secret: true },
+    ],
+    OCI: [
+      { name: "display_name", label: "Connector name", placeholder: "OCI usage reports" },
+      { name: "account_id", label: "Tenancy OCID", placeholder: "ocid1.tenancy..." },
+      { name: "region", label: "Home region", placeholder: "ap-mumbai-1" },
+      { name: "billing_source", label: "Usage report namespace", placeholder: "usage-api / object storage path" },
+      { name: "access_key", label: "User OCID / key fingerprint", placeholder: "ocid1.user... / fingerprint" },
+      { name: "private_key", label: "Private key", placeholder: "Paste OCI API private key", secret: true },
+    ],
+    AZURE: [
+      { name: "display_name", label: "Connector name", placeholder: "Azure cost management" },
+      { name: "account_id", label: "Subscription ID", placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" },
+      { name: "tenant_id", label: "Tenant ID", placeholder: "Azure AD tenant ID" },
+      { name: "billing_source", label: "Scope", placeholder: "subscription / management group" },
+      { name: "client_id", label: "Client ID", placeholder: "App registration client ID" },
+      { name: "secret_key", label: "Client secret", placeholder: "App registration secret", secret: true },
+    ],
+  };
   const pageCopy: Record<string, { title: string; body: string; icon: any }> = {
     Command: {
       title: "Command center",
@@ -1108,6 +1148,31 @@ function App() {
       .finally(() => setSavingRoleUserId(null));
   }
 
+  function saveCloudIntegration() {
+    setCloudSaving(true);
+    setCloudMessage("");
+    fetch(`${apiUrl}/api/cloud/integrations`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: cloudProviderSetup, ...cloudForm }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ detail: "Could not save cloud connector" }));
+          throw new Error(body.detail ?? "Could not save cloud connector");
+        }
+        return res.json();
+      })
+      .then((body) => {
+        setData((current) => ({ ...current, cloudIntegrations: [body.integration, ...(current.cloudIntegrations ?? [])] }));
+        setCloudForm({});
+        setCloudMessage(`${body.integration.provider} connector saved. Billing validation can run from this stored configuration.`);
+      })
+      .catch((err: Error) => setCloudMessage(err.message))
+      .finally(() => setCloudSaving(false));
+  }
+
   if (authLoading) {
     return (
       <main className="login-shell">
@@ -1318,27 +1383,72 @@ function App() {
         {activeView === "Cloud" && (
           <>
             <section className="stats-grid">
-              <Stat icon={Cloud} label="Providers" value={`${data.cloudProviders.length}`} signal="AWS + GCP + OCI" />
-              <Stat icon={LineChart} label="Exports" value="Ready" signal="CUR, BigQuery, usage reports" />
+              <Stat icon={Cloud} label="Connected" value={`${data.cloudIntegrations?.length ?? 0}`} signal="Cloud billing connectors" />
+              <Stat icon={LineChart} label="Exports" value={(data.cloudIntegrations?.length ?? 0) ? "Configured" : "Pending"} signal="CUR, BigQuery, usage reports" />
               <Stat icon={Building2} label="Customers" value={`${data.metrics.active_customers}`} signal="Active billing owners" />
               <Stat icon={ShieldCheck} label="Access mode" value="Read-only" signal="Billing export sync" />
             </section>
             <section className="grid two">
               <article className="panel">
                 <div className="panel-head"><div><span>Cloud Setup</span><h2>Provider connector status</h2></div><Cloud size={22} /></div>
-                <div className="feature-list">
-                  {["AWS Cost and Usage Report", "GCP BigQuery billing export", "OCI usage reports", "Azure Cost Management"].map((item) => (
-                    <label key={item}><CheckCircle2 size={16} /> {item}</label>
-                  ))}
+                <div className="cloud-connection-list">
+                  {(data.cloudIntegrations ?? []).length ? data.cloudIntegrations.map((integration) => (
+                    <div className="cloud-connection" key={integration.id}>
+                      <span className={`badge ${String(integration.provider).toLowerCase()}`}>{integration.provider}</span>
+                      <div>
+                        <strong>{integration.displayName}</strong>
+                        <small>{integration.accountId || "Account pending"} · {integration.region || "global"} · key {integration.credentialHint}</small>
+                      </div>
+                      <em>{integration.status}</em>
+                    </div>
+                  )) : (
+                    <p className="empty-state">No cloud billing connector is configured yet. Choose a provider and add read-only billing credentials.</p>
+                  )}
                 </div>
               </article>
               <article className="panel">
-                <div className="panel-head"><div><span>Connect Cloud</span><h2>Billing integrations</h2></div><PlugZap size={22} /></div>
-                <div className="feature-list">
-                  {["AWS CUR + Cost Explorer", "GCP BigQuery billing export", "OCI usage reports", "Azure Cost Management"].map((item) => (
-                    <label key={item}><CheckCircle2 size={16} /> {item}</label>
+                <div className="panel-head"><div><span>Connect Cloud</span><h2>Billing credentials</h2></div><PlugZap size={22} /></div>
+                <div className="provider-tabs">
+                  {["AWS", "GCP", "OCI", "AZURE"].map((provider) => (
+                    <button
+                      key={provider}
+                      className={cloudProviderSetup === provider ? "active" : ""}
+                      onClick={() => {
+                        setCloudProviderSetup(provider);
+                        setCloudForm({});
+                        setCloudMessage("");
+                      }}
+                    >
+                      {provider}
+                    </button>
                   ))}
                 </div>
+                <div className="cloud-form">
+                  {cloudSetupFields[cloudProviderSetup].map((field) => (
+                    <label key={field.name}>
+                      <span>{field.label}</span>
+                      {field.name === "service_account_json" || field.name === "private_key" ? (
+                        <textarea
+                          value={cloudForm[field.name] ?? ""}
+                          onChange={(event) => setCloudForm((current) => ({ ...current, [field.name]: event.target.value }))}
+                          placeholder={field.placeholder}
+                        />
+                      ) : (
+                        <input
+                          type={field.secret ? "password" : "text"}
+                          value={cloudForm[field.name] ?? ""}
+                          onChange={(event) => setCloudForm((current) => ({ ...current, [field.name]: event.target.value }))}
+                          placeholder={field.placeholder}
+                        />
+                      )}
+                    </label>
+                  ))}
+                </div>
+                <div className="cloud-form-actions">
+                  <button onClick={saveCloudIntegration} disabled={cloudSaving}><PlugZap size={16} /> {cloudSaving ? "Saving..." : `Save ${cloudProviderSetup} connector`}</button>
+                  <small>Use read-only billing/export credentials. Secrets are stored server-side and never returned to the browser.</small>
+                </div>
+                {cloudMessage && <p className="cluster-refresh-message">{cloudMessage}</p>}
               </article>
             </section>
           </>

@@ -29,6 +29,25 @@ class CloudSpend(Base):
     month: Mapped[str] = mapped_column(String(7), index=True)
 
 
+class CloudIntegration(Base):
+    __tablename__ = "cloud_integrations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    customer_id: Mapped[int] = mapped_column(Integer, index=True)
+    owner_user_id: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    provider: Mapped[str] = mapped_column(String(40), index=True)
+    display_name: Mapped[str] = mapped_column(String(120))
+    account_id: Mapped[str] = mapped_column(String(160), default="")
+    region: Mapped[str] = mapped_column(String(80), default="")
+    billing_source: Mapped[str] = mapped_column(String(160), default="")
+    credential_hint: Mapped[str] = mapped_column(String(120), default="")
+    credential_blob: Mapped[str] = mapped_column(String(4000), default="")
+    status: Mapped[str] = mapped_column(String(40), default="configured")
+    last_checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class KubernetesCost(Base):
     __tablename__ = "kubernetes_costs"
 
