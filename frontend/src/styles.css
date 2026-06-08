@@ -1345,6 +1345,45 @@ h1 {
   color: #edf7f1;
 }
 
+.kubernetes-health {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.kubernetes-health article {
+  min-height: 104px;
+  padding: 14px;
+  display: grid;
+  align-content: space-between;
+  border-radius: 8px;
+  color: #10201c;
+  background: linear-gradient(135deg, #ffffff, #f2faf6);
+  border: 1px solid rgba(16, 32, 28, 0.08);
+  box-shadow: 0 14px 34px rgba(16, 32, 28, 0.05);
+}
+
+.kubernetes-health span,
+.kubernetes-health small {
+  color: #60736b;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.kubernetes-health strong {
+  margin: 4px 0;
+  color: #10201c;
+  font-size: 24px;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
+.k8s-onboarding-panel {
+  grid-template-columns: minmax(320px, 0.78fr) minmax(380px, 1.22fr);
+}
+
 .onboarding-copy h2 {
   font-size: 32px;
   line-height: 1.05;
@@ -1465,6 +1504,125 @@ h1 {
 .cluster-actions button:disabled {
   cursor: wait;
   opacity: 0.68;
+}
+
+.kubernetes-layout {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.7fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.k8s-cost-panel,
+.k8s-network-panel {
+  overflow: hidden;
+}
+
+.table-shell {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid rgba(16, 32, 28, 0.08);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, #ffffff 30%, rgba(255, 255, 255, 0)),
+    linear-gradient(90deg, rgba(255, 255, 255, 0), #ffffff 70%) 100% 0,
+    linear-gradient(90deg, rgba(16, 32, 28, 0.12), rgba(16, 32, 28, 0)),
+    linear-gradient(270deg, rgba(16, 32, 28, 0.12), rgba(16, 32, 28, 0)) 100% 0;
+  background-attachment: local, local, scroll, scroll;
+  background-repeat: no-repeat;
+  background-size: 36px 100%, 36px 100%, 16px 100%, 16px 100%;
+}
+
+.k8s-table {
+  min-width: 920px;
+}
+
+.k8s-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f7fbf8;
+}
+
+.k8s-table td {
+  vertical-align: top;
+}
+
+.k8s-table td:first-child,
+.k8s-table td:nth-child(2),
+.k8s-table td:nth-child(3) {
+  max-width: 220px;
+}
+
+.cell-title,
+.cell-detail {
+  display: block;
+  max-width: 240px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.cell-title {
+  color: #10201c;
+  font-weight: 900;
+}
+
+.cell-detail {
+  color: #465b53;
+  font-weight: 750;
+}
+
+.metric-cell,
+.money-cell {
+  white-space: nowrap;
+  color: #10201c;
+  font-weight: 900;
+}
+
+.metric-cell small {
+  display: block;
+  margin-top: 3px;
+  color: #6c7e76;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.k8s-owner-panel {
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 140px);
+  overflow: auto;
+}
+
+.k8s-owner {
+  padding: 12px;
+  border: 1px solid rgba(16, 32, 28, 0.08);
+  border-radius: 8px;
+  background: #f8fbf9;
+}
+
+.k8s-owner label {
+  min-width: 0;
+}
+
+.k8s-owner label,
+.k8s-owner label strong {
+  overflow-wrap: anywhere;
+}
+
+.k8s-owner label strong {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.k8s-network-panel {
+  margin-top: 16px;
+}
+
+.network-table {
+  min-width: 980px;
 }
 
 .cluster-refresh-message {
@@ -1790,6 +1948,8 @@ td:last-child {
   .hero,
   .stats-grid,
   .cockpit-strip,
+  .kubernetes-health,
+  .kubernetes-layout,
   .command-grid,
   .two,
   .main-grid,
@@ -1825,6 +1985,15 @@ td:last-child {
 
   .pipeline-track {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .kubernetes-health {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .k8s-owner-panel {
+    position: static;
+    max-height: none;
   }
 }
 
@@ -1976,9 +2145,29 @@ td:last-child {
   }
 
   .cockpit-strip,
+  .kubernetes-health,
   .pipeline-track,
   .command-grid {
     grid-template-columns: 1fr;
+  }
+
+  .k8s-onboarding-panel,
+  .kubernetes-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .kubernetes-health article {
+    min-height: 86px;
+  }
+
+  .k8s-table {
+    display: table;
+    min-width: 860px;
+    white-space: normal;
+  }
+
+  .network-table {
+    min-width: 900px;
   }
 
   .row,

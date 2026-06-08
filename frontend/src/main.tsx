@@ -694,6 +694,17 @@ function App() {
   const connectorCluster = generatedConnectorCluster ?? onboarding?.clusters?.find((cluster) => cluster.clusterName === connectorClusterName) ?? null;
   const liveKubernetesRows = k8sRows.length;
   const networkNamespaces = new Set((data.networkUsage ?? []).map((row) => `${row.cluster}:${row.namespace}`)).size;
+  const k8sNamespaces = k8sChargeback.length;
+  const k8sClusters = new Set(k8sRows.map((row) => String(row.cluster ?? "cluster"))).size;
+  const k8sTotalCost = k8sRows.reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
+  const k8sNetworkRows = data.networkUsage?.length ?? 0;
+  const kubernetesSignals = [
+    { label: "Connected clusters", value: k8sClusters ? `${k8sClusters}` : "Waiting", detail: verifiedConnectorCluster ? `Latest: ${verifiedConnectorCluster.clusterName}` : "Verify an installed agent" },
+    { label: "Live namespaces", value: k8sNamespaces ? `${k8sNamespaces}` : "0", detail: "Chargeback groups" },
+    { label: "Pod rows", value: liveKubernetesRows ? `${liveKubernetesRows}` : "0", detail: "CPU and RAM metering" },
+    { label: "K8s cost", value: k8sTotalCost ? formatInr(k8sTotalCost) : "Waiting", detail: "Current captured usage" },
+    { label: "Network rows", value: k8sNetworkRows ? `${k8sNetworkRows}` : "0", detail: "RX/TX telemetry" },
+  ];
   const readyInvoices = data.invoices.filter((invoice) => String(invoice.status) === "ready").length;
   const activeAlerts = data.alerts.length;
   const cockpitSignals = [
@@ -1144,7 +1155,17 @@ function App() {
 
         {activeView === "Kubernetes" && (
           <>
-            <section className="onboarding-panel">
+            <section className="kubernetes-health">
+              {kubernetesSignals.map((signal) => (
+                <article key={signal.label}>
+                  <span>{signal.label}</span>
+                  <strong>{signal.value}</strong>
+                  <small>{signal.detail}</small>
+                </article>
+              ))}
+            </section>
+
+            <section className="onboarding-panel k8s-onboarding-panel">
               <div className="onboarding-copy">
                 <span className="eyebrow">Company onboarding</span>
                 <h2>Connect Kubernetes with one read-only command.</h2>
@@ -1180,23 +1201,31 @@ function App() {
                 </article>
               </div>
             </section>
-            <section className="grid main-grid">
-              <article className="panel wide">
+            <section className="kubernetes-layout">
+              <article className="panel wide k8s-cost-panel">
                 <div className="panel-head"><div><span>Kubernetes Costing</span><h2>Namespace and pod-level chargeback</h2></div><ServerCog size={22} /></div>
-                <table>
-                  <thead><tr><th>Cluster</th><th>Namespace</th><th>Workload</th><th>CPU</th><th>Memory</th><th>Source</th><th>Cost</th></tr></thead>
-                  <tbody>
-                    {k8sRows.length ? k8sRows.map((row) => (
-                      <tr key={`${row.cluster}-${row.namespace}-${row.workload}`}>
-                        <td>{row.cluster}</td><td>{row.namespace}</td><td>{row.workload}</td><td>{compact(Number(row.cpu))} cores</td><td>{compact(Number(row.memory))} GiB</td><td><span className={`source-pill ${String(row.source)}`}>{row.source}</span></td><td>{formatInr(Number(row.amount))}</td>
-                      </tr>
-                    )) : (
-                      <tr><td colSpan={7}><span className="empty-state">Waiting for live pod-level costing from the CloudMeter agent.</span></td></tr>
-                    )}
-                  </tbody>
-                </table>
+                <div className="table-shell k8s-table-shell">
+                  <table className="k8s-table">
+                    <thead><tr><th>Cluster</th><th>Namespace</th><th>Workload</th><th>CPU</th><th>Memory</th><th>Source</th><th>Cost</th></tr></thead>
+                    <tbody>
+                      {k8sRows.length ? k8sRows.map((row) => (
+                        <tr key={`${row.cluster}-${row.namespace}-${row.workload}`}>
+                          <td><span className="cell-title">{row.cluster}</span></td>
+                          <td><span className="cell-title">{row.namespace}</span></td>
+                          <td><span className="cell-detail">{row.workload}</span></td>
+                          <td className="metric-cell">{compact(Number(row.cpu))}<small>cores</small></td>
+                          <td className="metric-cell">{compact(Number(row.memory))}<small>GiB</small></td>
+                          <td><span className={`source-pill ${String(row.source)}`}>{row.source}</span></td>
+                          <td className="money-cell">{formatInr(Number(row.amount))}</td>
+                        </tr>
+                      )) : (
+                        <tr><td colSpan={7}><span className="empty-state">Waiting for live pod-level costing from the CloudMeter agent.</span></td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </article>
-              <article className="panel">
+              <article className="panel k8s-owner-panel">
                 <div className="panel-head"><div><span>Chargeback</span><h2>Namespace owners</h2></div><Banknote size={22} /></div>
                 <div className="chargeback">
                   {k8sChargeback.length ? k8sChargeback.map((item) => (
@@ -1209,24 +1238,28 @@ function App() {
                 </div>
               </article>
             </section>
-            <section className="panel user-management">
+            <section className="panel user-management k8s-network-panel">
               <div className="panel-head"><div><span>Network Traffic</span><h2>Namespace RX/TX from Prometheus, Cilium, Istio, or inventory fallback</h2></div><Activity size={22} /></div>
-              <table>
-                <thead><tr><th>Cluster</th><th>Namespace</th><th>Workload</th><th>Ingress</th><th>Egress</th><th>Source</th><th>Observed</th></tr></thead>
-                <tbody>
-                  {(data.networkUsage ?? []).map((row) => (
-                    <tr key={`${row.cluster}-${row.namespace}-${row.workload}`}>
-                      <td>{row.cluster}</td>
-                      <td>{row.namespace}</td>
-                      <td>{row.workload}</td>
-                      <td>{formatBytesPerSec(Number(row.rxBytesPerSec))}</td>
-                      <td>{formatBytesPerSec(Number(row.txBytesPerSec))}</td>
-                      <td><span className={`source-pill ${String(row.source)}`}>{row.source}</span></td>
-                      <td>{row.observedAt ? new Date(String(row.observedAt)).toLocaleTimeString() : "-"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="table-shell k8s-table-shell">
+                <table className="k8s-table network-table">
+                  <thead><tr><th>Cluster</th><th>Namespace</th><th>Workload</th><th>Ingress</th><th>Egress</th><th>Source</th><th>Observed</th></tr></thead>
+                  <tbody>
+                    {(data.networkUsage ?? []).length ? (data.networkUsage ?? []).map((row) => (
+                      <tr key={`${row.cluster}-${row.namespace}-${row.workload}`}>
+                        <td><span className="cell-title">{row.cluster}</span></td>
+                        <td><span className="cell-title">{row.namespace}</span></td>
+                        <td><span className="cell-detail">{row.workload}</span></td>
+                        <td className="metric-cell">{formatBytesPerSec(Number(row.rxBytesPerSec))}</td>
+                        <td className="metric-cell">{formatBytesPerSec(Number(row.txBytesPerSec))}</td>
+                        <td><span className={`source-pill ${String(row.source)}`}>{row.source}</span></td>
+                        <td>{row.observedAt ? new Date(String(row.observedAt)).toLocaleTimeString() : "-"}</td>
+                      </tr>
+                    )) : (
+                      <tr><td colSpan={7}><span className="empty-state">Waiting for network metrics from Prometheus, Cilium, Istio, or inventory fallback.</span></td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </section>
           </>
         )}
