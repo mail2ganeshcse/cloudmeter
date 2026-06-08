@@ -45,6 +45,7 @@ type Dashboard = {
   teamChargeback: Array<{ team: string; amount: number }>;
   kubernetes: Array<Record<string, string | number>>;
   networkUsage: Array<Record<string, string | number>>;
+  nodeInventory: Array<Record<string, string | number>>;
   aiUsage: Array<Record<string, string | number>>;
   invoices: Array<Record<string, string | number>>;
   alerts: Array<Record<string, string | number>>;
@@ -177,6 +178,7 @@ const fallback: Dashboard = {
   teamChargeback: [],
   kubernetes: [],
   networkUsage: [],
+  nodeInventory: [],
   aiUsage: [],
   invoices: [],
   alerts: [],
@@ -206,6 +208,26 @@ function formatBytesPerSec(value: number) {
     return `${(value / 1024).toFixed(1)} KiB/s`;
   }
   return `${Math.round(value)} B/s`;
+}
+
+function formatCpu(cores: number) {
+  if (!cores) {
+    return { value: "0", unit: "cores" };
+  }
+  if (Math.abs(cores) < 1) {
+    return { value: `${(cores * 1000).toFixed(cores * 1000 < 10 ? 1 : 0)}`, unit: "millicores" };
+  }
+  return { value: cores.toFixed(cores < 10 ? 2 : 1), unit: "cores" };
+}
+
+function formatMemory(gib: number) {
+  if (!gib) {
+    return { value: "0", unit: "GiB" };
+  }
+  if (Math.abs(gib) < 1) {
+    return { value: `${(gib * 1024).toFixed(0)}`, unit: "MiB" };
+  }
+  return { value: gib.toFixed(gib < 10 ? 2 : 1), unit: "GiB" };
 }
 
 function Bar({ value, max }: { value: number; max: number }) {
@@ -652,6 +674,9 @@ function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [onboarding, setOnboarding] = useState<Onboarding | null>(null);
   const [activeView, setActiveView] = useState(initialWorkspaceView);
+  const [k8sCostBasis, setK8sCostBasis] = useState("all");
+  const [k8sClusterFilter, setK8sClusterFilter] = useState("all");
+  const [k8sNamespaceFilter, setK8sNamespaceFilter] = useState("all");
   const [copied, setCopied] = useState("");
   const [authLoading, setAuthLoading] = useState(true);
   const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
@@ -723,6 +748,37 @@ function App() {
   const k8sClusters = new Set(k8sRows.map((row) => String(row.cluster ?? "cluster"))).size;
   const k8sTotalCost = k8sRows.reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
   const k8sNetworkRows = data.networkUsage?.length ?? 0;
+  const k8sClusterOptions = Array.from(new Set(k8sRows.map((row) => String(row.cluster ?? "cluster")))).sort();
+  const k8sNamespaceOptions = Array.from(new Set(k8sRows.map((row) => String(row.namespace ?? "unknown")))).sort();
+  const filteredK8sRows = k8sRows.filter((row) => (
+    (k8sClusterFilter === "all" || String(row.cluster) === k8sClusterFilter)
+    && (k8sNamespaceFilter === "all" || String(row.namespace) === k8sNamespaceFilter)
+  ));
+  const nodeMonthlyTotal = (data.nodeInventory ?? []).reduce((sum, node) => sum + Number(node.monthlyInr ?? 0), 0);
+  const totalK8sCpu = k8sRows.reduce((sum, row) => sum + Number(row.cpu ?? 0), 0);
+  const networkCostByNamespace = new Map<string, number>();
+  (data.networkUsage ?? []).forEach((row) => {
+    const key = `${row.cluster}:${row.namespace}`;
+    const mibPerSec = (Number(row.rxBytesPerSec ?? 0) + Number(row.txBytesPerSec ?? 0)) / 1024 / 1024;
+    networkCostByNamespace.set(key, (networkCostByNamespace.get(key) ?? 0) + (mibPerSec * 0.75));
+  });
+  const costForK8sRow = (row: Record<string, string | number>) => {
+    const cpuCost = Number(row.cpu ?? 0) * 120;
+    const memoryCost = Number(row.memory ?? 0) * 35;
+    const networkCost = networkCostByNamespace.get(`${row.cluster}:${row.namespace}`) ?? 0;
+    const storageCost = Number(row.storageGiB ?? 0) * 8;
+    const nodeCost = totalK8sCpu > 0
+      ? (Number(row.cpu ?? 0) / totalK8sCpu) * nodeMonthlyTotal
+      : nodeMonthlyTotal / Math.max(k8sRows.length, 1);
+    if (k8sCostBasis === "cpu") return cpuCost;
+    if (k8sCostBasis === "memory") return memoryCost;
+    if (k8sCostBasis === "cpu-memory") return cpuCost + memoryCost;
+    if (k8sCostBasis === "network") return networkCost;
+    if (k8sCostBasis === "storage") return storageCost;
+    if (k8sCostBasis === "node") return nodeCost;
+    return cpuCost + memoryCost + networkCost + storageCost + nodeCost;
+  };
+  const filteredK8sTotal = filteredK8sRows.reduce((sum, row) => sum + costForK8sRow(row), 0);
   const kubernetesSignals = [
     { label: "Connected clusters", value: k8sClusters ? `${k8sClusters}` : "Waiting", detail: verifiedConnectorCluster ? `Latest: ${verifiedConnectorCluster.clusterName}` : "Verify an installed agent" },
     { label: "Live namespaces", value: k8sNamespaces ? `${k8sNamespaces}` : "0", detail: "Chargeback groups" },
@@ -1252,21 +1308,62 @@ function App() {
             <section className="kubernetes-layout">
               <article className="panel wide k8s-cost-panel">
                 <div className="panel-head"><div><span>Kubernetes Costing</span><h2>Namespace and pod-level chargeback</h2></div><ServerCog size={22} /></div>
+                <div className="k8s-controls">
+                  <label>
+                    <span>Cost basis</span>
+                    <select value={k8sCostBasis} onChange={(event) => setK8sCostBasis(event.target.value)}>
+                      <option value="all">All: node + CPU + RAM + network + storage</option>
+                      <option value="node">Node cost allocation</option>
+                      <option value="cpu">CPU only</option>
+                      <option value="memory">RAM only</option>
+                      <option value="cpu-memory">CPU + RAM</option>
+                      <option value="network">Network only</option>
+                      <option value="storage">Storage only</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Cluster</span>
+                    <select value={k8sClusterFilter} onChange={(event) => setK8sClusterFilter(event.target.value)}>
+                      <option value="all">All clusters</option>
+                      {k8sClusterOptions.map((cluster) => <option key={cluster} value={cluster}>{cluster}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Namespace</span>
+                    <select value={k8sNamespaceFilter} onChange={(event) => setK8sNamespaceFilter(event.target.value)}>
+                      <option value="all">All namespaces</option>
+                      {k8sNamespaceOptions.map((namespace) => <option key={namespace} value={namespace}>{namespace}</option>)}
+                    </select>
+                  </label>
+                  <div className="k8s-cost-total">
+                    <span>Selected cost</span>
+                    <strong>{formatInr(filteredK8sTotal)}</strong>
+                  </div>
+                </div>
+                <div className="k8s-feature-strip">
+                  {["CPU millicores", "RAM working set", "Node EC2 type", "Network RX/TX", "Storage when connected"].map((item) => (
+                    <label key={item}><CheckCircle2 size={15} /> {item}</label>
+                  ))}
+                </div>
                 <div className="table-shell k8s-table-shell">
                   <table className="k8s-table">
-                    <thead><tr><th>Cluster</th><th>Namespace</th><th>Workload</th><th>CPU</th><th>Memory</th><th>Source</th><th>Cost</th></tr></thead>
+                    <thead><tr><th>Cluster</th><th>Namespace</th><th>Workload</th><th>CPU</th><th>Memory</th><th>Source</th><th>Selected Cost</th></tr></thead>
                     <tbody>
-                      {k8sRows.length ? k8sRows.map((row) => (
-                        <tr key={`${row.cluster}-${row.namespace}-${row.workload}`}>
-                          <td><span className="cell-title">{row.cluster}</span></td>
-                          <td><span className="cell-title">{row.namespace}</span></td>
-                          <td><span className="cell-detail">{row.workload}</span></td>
-                          <td className="metric-cell">{compact(Number(row.cpu))}<small>cores</small></td>
-                          <td className="metric-cell">{compact(Number(row.memory))}<small>GiB</small></td>
-                          <td><span className={`source-pill ${String(row.source)}`}>{row.source}</span></td>
-                          <td className="money-cell">{formatInr(Number(row.amount))}</td>
-                        </tr>
-                      )) : (
+                      {filteredK8sRows.length ? filteredK8sRows.map((row) => {
+                        const cpu = formatCpu(Number(row.cpu));
+                        const memory = formatMemory(Number(row.memory));
+                        return (
+                          <tr key={`${row.cluster}-${row.namespace}-${row.workload}`}>
+                            <td><span className="cell-title">{row.cluster}</span></td>
+                            <td><span className="cell-title">{row.namespace}</span></td>
+                            <td><span className="cell-detail">{row.workload}</span></td>
+                            <td className="metric-cell">{cpu.value}<small>{cpu.unit}</small></td>
+                            <td className="metric-cell">{memory.value}<small>{memory.unit}</small></td>
+                            <td><span className={`source-pill ${String(row.source)}`}>{row.source}</span></td>
+                            <td className="money-cell">{formatInr(costForK8sRow(row))}</td>
+                          </tr>
+                        );
+                      }) : (
                         <tr><td colSpan={7}><span className="empty-state">Waiting for live pod-level costing from the CloudMeter agent.</span></td></tr>
                       )}
                     </tbody>
@@ -1285,6 +1382,34 @@ function App() {
                   )) : <p className="empty-state">No live namespace chargeback yet. Run the agent and verify the cluster.</p>}
                 </div>
               </article>
+            </section>
+            <section className="panel k8s-node-panel">
+              <div className="panel-head"><div><span>Node Cost</span><h2>AWS EC2 node type and allocatable capacity</h2></div><Cpu size={22} /></div>
+              <div className="table-shell k8s-table-shell">
+                <table className="k8s-table node-table">
+                  <thead><tr><th>Cluster</th><th>Node</th><th>Instance</th><th>Zone</th><th>CPU</th><th>Memory</th><th>Hourly</th><th>Monthly</th></tr></thead>
+                  <tbody>
+                    {(data.nodeInventory ?? []).length ? (data.nodeInventory ?? []).map((node) => {
+                      const cpu = formatCpu(Number(node.cpuAllocatable));
+                      const memory = formatMemory(Number(node.memoryGib));
+                      return (
+                        <tr key={`${node.cluster}-${node.nodeName}`}>
+                          <td><span className="cell-title">{node.cluster}</span></td>
+                          <td><span className="cell-detail">{node.nodeName}</span></td>
+                          <td><span className="source-pill live">{node.instanceType}</span></td>
+                          <td>{node.zone}</td>
+                          <td className="metric-cell">{cpu.value}<small>{cpu.unit}</small></td>
+                          <td className="metric-cell">{memory.value}<small>{memory.unit}</small></td>
+                          <td className="money-cell">{formatInr(Number(node.hourlyInr))}/h</td>
+                          <td className="money-cell">{formatInr(Number(node.monthlyInr))}</td>
+                        </tr>
+                      );
+                    }) : (
+                      <tr><td colSpan={8}><span className="empty-state">Node inventory will appear after reinstalling or updating the CloudMeter agent. It reads Kubernetes node labels such as node.kubernetes.io/instance-type.</span></td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </section>
             <section className="panel user-management k8s-network-panel">
               <div className="panel-head"><div><span>Network Traffic</span><h2>Namespace RX/TX from Prometheus, Cilium, Istio, or inventory fallback</h2></div><Activity size={22} /></div>

@@ -62,6 +62,24 @@ class NetworkUsage(Base):
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class ClusterNodeInventory(Base):
+    __tablename__ = "cluster_node_inventory"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    customer_id: Mapped[int] = mapped_column(Integer, index=True)
+    owner_user_id: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    cluster: Mapped[str] = mapped_column(String(120), index=True)
+    node_name: Mapped[str] = mapped_column(String(160))
+    instance_type: Mapped[str] = mapped_column(String(80), default="unknown")
+    zone: Mapped[str] = mapped_column(String(80), default="unknown")
+    provider_id: Mapped[str] = mapped_column(String(240), default="")
+    cpu_allocatable: Mapped[float] = mapped_column(Float, default=0)
+    memory_gib: Mapped[float] = mapped_column(Float, default=0)
+    hourly_inr: Mapped[float] = mapped_column(Float, default=0)
+    source: Mapped[str] = mapped_column(String(80), default="kubernetes-node")
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class AiUsage(Base):
     __tablename__ = "ai_usage"
 

@@ -24,6 +24,7 @@ from .models import (
     BudgetAlert,
     CloudSpend,
     ClusterConnection,
+    ClusterNodeInventory,
     Customer,
     Invoice,
     KubernetesCost,
@@ -56,6 +57,39 @@ def startup() -> None:
 
 def money(value: float | None) -> int:
     return round(value or 0)
+
+
+EC2_HOURLY_USD = {
+    "t2.micro": 0.0116,
+    "t2.small": 0.023,
+    "t2.medium": 0.0464,
+    "t3.micro": 0.0104,
+    "t3.small": 0.0208,
+    "t3.medium": 0.0416,
+    "t3.large": 0.0832,
+    "m5.large": 0.096,
+    "m5.xlarge": 0.192,
+    "m5.2xlarge": 0.384,
+    "m6i.large": 0.096,
+    "m6i.xlarge": 0.192,
+    "m6i.2xlarge": 0.384,
+    "c5.large": 0.085,
+    "c5.xlarge": 0.17,
+    "c6i.large": 0.085,
+    "c6i.xlarge": 0.17,
+    "r5.large": 0.126,
+    "r5.xlarge": 0.252,
+    "r6i.large": 0.126,
+    "r6i.xlarge": 0.252,
+}
+USD_TO_INR = 83
+
+
+def estimate_node_hourly_inr(instance_type: str, cpu_allocatable: float, memory_gib: float) -> float:
+    normalized_type = (instance_type or "").strip().lower()
+    if normalized_type in EC2_HOURLY_USD:
+        return round(EC2_HOURLY_USD[normalized_type] * USD_TO_INR, 2)
+    return round((cpu_allocatable * 2.8) + (memory_gib * 0.35), 2)
 
 
 class GoogleLoginRequest(BaseModel):
@@ -111,6 +145,15 @@ class PodSnapshot(BaseModel):
     memory_mib: float = 0
 
 
+class NodeSnapshot(BaseModel):
+    name: str
+    instance_type: str = "unknown"
+    zone: str = "unknown"
+    provider_id: str = ""
+    cpu_allocatable: float = 0
+    memory_mib: float = 0
+
+
 class AgentSnapshotRequest(BaseModel):
     token: str
     cluster_name: str
@@ -119,6 +162,7 @@ class AgentSnapshotRequest(BaseModel):
     pod_count: int = 0
     namespaces: list[NamespaceSnapshot] = []
     pods: list[PodSnapshot] = []
+    nodes: list[NodeSnapshot] = []
 
 
 class NetworkMetric(BaseModel):
@@ -846,12 +890,34 @@ def agent_snapshot(payload: AgentSnapshotRequest, db: Session = Depends(get_db))
     cluster.last_seen = datetime.now(UTC).isoformat()
 
     db.query(KubernetesCost).filter(KubernetesCost.cluster == cluster.cluster_name, KubernetesCost.owner_user_id == cluster.owner_user_id).delete()
+    db.query(ClusterNodeInventory).filter(ClusterNodeInventory.cluster == cluster.cluster_name, ClusterNodeInventory.owner_user_id == cluster.owner_user_id).delete()
     month = datetime.now(UTC).strftime("%Y-%m")
     rows_created = 0
+    observed_at = datetime.now(UTC)
+    for node in payload.nodes:
+        if not node.name:
+            continue
+        memory_gib = round(node.memory_mib / 1024, 3)
+        db.add(
+            ClusterNodeInventory(
+                customer_id=cluster.customer_id,
+                owner_user_id=cluster.owner_user_id,
+                cluster=cluster.cluster_name,
+                node_name=node.name,
+                instance_type=node.instance_type or "unknown",
+                zone=node.zone or "unknown",
+                provider_id=node.provider_id or "",
+                cpu_allocatable=round(node.cpu_allocatable, 3),
+                memory_gib=memory_gib,
+                hourly_inr=estimate_node_hourly_inr(node.instance_type, node.cpu_allocatable, memory_gib),
+                observed_at=observed_at,
+            )
+        )
+
     for pod in payload.pods:
         if not pod.namespace or not pod.pod:
             continue
-        cpu_cores = round(pod.cpu_millicores / 1000, 3)
+        cpu_cores = round(pod.cpu_millicores / 1000, 6)
         memory_gib = round(pod.memory_mib / 1024, 3)
         estimated_amount = round((cpu_cores * 120) + (memory_gib * 35) + 2)
         db.add(
@@ -875,7 +941,7 @@ def agent_snapshot(payload: AgentSnapshotRequest, db: Session = Depends(get_db))
         for namespace in payload.namespaces:
             if not namespace.namespace:
                 continue
-            cpu_cores = round(namespace.cpu_millicores / 1000, 3)
+            cpu_cores = round(namespace.cpu_millicores / 1000, 6)
             memory_gib = round(namespace.memory_mib / 1024, 3)
             estimated_amount = round((cpu_cores * 120) + (memory_gib * 35) + (namespace.pods * 10))
             db.add(
@@ -1089,6 +1155,24 @@ spec:
                 pod_count="$(kubectl get pods -A --no-headers 2>/dev/null | wc -l | tr -d ' ')"
                 pod_counts="$(kubectl get pods -A --no-headers 2>/dev/null | awk '{count[$1]++} END {for (ns in count) print ns, count[ns]}')"
                 metrics="$(kubectl top pods -A --no-headers 2>/dev/null || true)"
+                nodes_json="$(kubectl get nodes -o custom-columns=NAME:.metadata.name,TYPE:.metadata.labels.node\\.kubernetes\\.io/instance-type,ZONE:.metadata.labels.topology\\.kubernetes\\.io/zone,CPU:.status.allocatable.cpu,MEMORY:.status.allocatable.memory,PROVIDER:.spec.providerID --no-headers 2>/dev/null | awk '
+                  function cpu(v) {
+                    if (v ~ /n$/) return substr(v,1,length(v)-1)/1000000000;
+                    if (v ~ /u$/) return substr(v,1,length(v)-1)/1000000;
+                    if (v ~ /m$/) return substr(v,1,length(v)-1)/1000;
+                    return v+0;
+                  }
+                  function mem(v) {
+                    if (v ~ /Ki$/) return substr(v,1,length(v)-2)/1024;
+                    if (v ~ /Mi$/) return substr(v,1,length(v)-2);
+                    if (v ~ /Gi$/) return substr(v,1,length(v)-2)*1024;
+                    return 0;
+                  }
+                  function clean(v) { if (v == "<none>" || v == "") return "unknown"; gsub(/"/, "", v); return v; }
+                  NF >= 5 {
+                    if (!first_seen) { first_seen=1 } else { printf "," }
+                    printf "{\\"name\\":\\"%s\\",\\"instance_type\\":\\"%s\\",\\"zone\\":\\"%s\\",\\"cpu_allocatable\\":%.3f,\\"memory_mib\\":%.3f,\\"provider_id\\":\\"%s\\"}", clean($1), clean($2), clean($3), cpu($4), mem($5), clean($6);
+                  }')"
                 namespaces_json=""
                 pods_json=""
                 if [ -n "$metrics" ]; then
@@ -1143,7 +1227,7 @@ spec:
                       printf "{\\"namespace\\":\\"%s\\",\\"pod\\":\\"%s\\",\\"cpu_millicores\\":0,\\"memory_mib\\":0}", $1, $2;
                     }')"
                 fi
-                payload="{\\"token\\":\\"${CLOUDMETER_TOKEN}\\",\\"cluster_name\\":\\"${CLOUDMETER_CLUSTER}\\",\\"provider\\":\\"${CLOUDMETER_PROVIDER:-Kubernetes}\\",\\"node_count\\":${node_count:-0},\\"pod_count\\":${pod_count:-0},\\"namespaces\\":[${namespaces_json}],\\"pods\\":[${pods_json}]}"
+                payload="{\\"token\\":\\"${CLOUDMETER_TOKEN}\\",\\"cluster_name\\":\\"${CLOUDMETER_CLUSTER}\\",\\"provider\\":\\"${CLOUDMETER_PROVIDER:-Kubernetes}\\",\\"node_count\\":${node_count:-0},\\"pod_count\\":${pod_count:-0},\\"namespaces\\":[${namespaces_json}],\\"pods\\":[${pods_json}],\\"nodes\\":[${nodes_json}]}"
                 curl -fsSL -X POST "${agent_api_url}/api/agent/snapshot" -H "Content-Type: application/json" -d "$payload" || true
               }
               while true; do
@@ -1440,6 +1524,12 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]
         .order_by((NetworkUsage.rx_bytes_per_sec + NetworkUsage.tx_bytes_per_sec).desc())
         .all()
     )
+    node_inventory = (
+        db.query(ClusterNodeInventory)
+        .filter(ClusterNodeInventory.owner_user_id == user.id)
+        .order_by(ClusterNodeInventory.cluster, ClusterNodeInventory.node_name)
+        .all()
+    )
     invoices = db.query(Invoice).order_by(Invoice.total_inr.desc()).all()
     alerts = db.query(BudgetAlert).order_by(BudgetAlert.current_inr.desc()).all()
 
@@ -1513,6 +1603,22 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]
                 "observedAt": n.observed_at.isoformat(),
             }
             for n in network_usage
+        ],
+        "nodeInventory": [
+            {
+                "cluster": n.cluster,
+                "nodeName": n.node_name,
+                "instanceType": n.instance_type,
+                "zone": n.zone,
+                "providerId": n.provider_id,
+                "cpuAllocatable": n.cpu_allocatable,
+                "memoryGib": n.memory_gib,
+                "hourlyInr": n.hourly_inr,
+                "monthlyInr": money(n.hourly_inr * 730),
+                "source": n.source,
+                "observedAt": n.observed_at.isoformat(),
+            }
+            for n in node_inventory
         ],
         "invoices": [
             {
