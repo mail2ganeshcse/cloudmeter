@@ -670,6 +670,27 @@ function App() {
   const isSuperadmin = session?.session.role === "superadmin";
   const limited = session?.session.role !== "admin" && !isSuperadmin;
   const connectorCluster = generatedConnectorCluster ?? onboarding?.clusters?.find((cluster) => cluster.clusterName === connectorClusterName) ?? null;
+  const liveKubernetesRows = data.kubernetes.filter((row) => String(row.source) === "live").length;
+  const networkNamespaces = new Set((data.networkUsage ?? []).map((row) => `${row.cluster}:${row.namespace}`)).size;
+  const readyInvoices = data.invoices.filter((invoice) => String(invoice.status) === "ready").length;
+  const activeAlerts = data.alerts.length;
+  const cockpitSignals = [
+    { label: "Live pods", value: liveKubernetesRows ? `${liveKubernetesRows}` : "Waiting", detail: "Kubernetes chargeback rows", tone: liveKubernetesRows ? "good" : "watch" },
+    { label: "Network namespaces", value: networkNamespaces ? `${networkNamespaces}` : "None", detail: "RX/TX reporting scope", tone: networkNamespaces ? "good" : "watch" },
+    { label: "Ready invoices", value: `${readyInvoices}`, detail: "Awaiting review", tone: readyInvoices ? "gold" : "quiet" },
+    { label: "Budget signals", value: `${activeAlerts}`, detail: "Open recommendations", tone: activeAlerts ? "hot" : "good" },
+  ];
+  const billingPipeline = [
+    { label: "Ingest", detail: "Cloud, K8s and AI meters", value: compact(data.metrics.requests), icon: Activity },
+    { label: "Allocate", detail: "Teams, namespaces, products", value: `${data.teamChargeback.length}`, icon: Layers3 },
+    { label: "Forecast", detail: "Month-end billing exposure", value: formatInr(data.metrics.forecast_total_inr), icon: LineChart },
+    { label: "Invoice", detail: "Customer-ready totals", value: formatInr(data.metrics.invoice_total_inr), icon: Receipt },
+  ];
+  const commandActions = [
+    { label: "Connect cluster", detail: "Generate a read-only agent script", icon: Boxes, view: "Kubernetes" },
+    { label: "Review AI meter", detail: "Inspect token and GPU usage", icon: Brain, view: "AI Metering" },
+    { label: "Prepare invoices", detail: "Check customer-ready bills", icon: Receipt, view: "Invoices" },
+  ];
   const pageCopy: Record<string, { title: string; body: string; icon: any }> = {
     Command: {
       title: "Command center",
@@ -971,6 +992,16 @@ function App() {
           </div>
         </section>
 
+        <section className="cockpit-strip">
+          {cockpitSignals.map((signal) => (
+            <article className={`cockpit-card ${signal.tone}`} key={signal.label}>
+              <span>{signal.label}</span>
+              <strong>{signal.value}</strong>
+              <small>{signal.detail}</small>
+            </article>
+          ))}
+        </section>
+
         {activeView === "Command" && (
           <>
             <section className="hero">
@@ -997,6 +1028,40 @@ function App() {
               <Stat icon={Brain} label="AI tokens billed" value={compact(data.metrics.tokens)} signal={`${compact(data.metrics.requests)} requests`} />
               <Stat icon={Cpu} label="GPU metered" value={`${data.metrics.gpu_hours} hrs`} signal="Ollama + workloads" />
               <Stat icon={FileText} label="Invoice value" value={formatInr(data.metrics.invoice_total_inr)} signal={`${data.metrics.active_customers} active customers`} />
+            </section>
+
+            <section className="command-grid">
+              <article className="panel pipeline-panel">
+                <div className="panel-head"><div><span>Billing Pipeline</span><h2>Meter to invoice flow</h2></div><Gauge size={22} /></div>
+                <div className="pipeline-track">
+                  {billingPipeline.map((step, index) => {
+                    const StepIcon = step.icon;
+                    return (
+                      <div className="pipeline-step" key={step.label}>
+                        <div><StepIcon size={18} /><em>{index + 1}</em></div>
+                        <strong>{step.label}</strong>
+                        <span>{step.detail}</span>
+                        <b>{step.value}</b>
+                      </div>
+                    );
+                  })}
+                </div>
+              </article>
+              <article className="panel action-panel">
+                <div className="panel-head"><div><span>Operator Shortcuts</span><h2>Next best actions</h2></div><Sparkles size={22} /></div>
+                <div className="action-tiles">
+                  {commandActions.map((action) => {
+                    const ActionIcon = action.icon;
+                    return (
+                      <button key={action.label} onClick={() => setActiveView(action.view)}>
+                        <ActionIcon size={20} />
+                        <span>{action.label}</span>
+                        <small>{action.detail}</small>
+                      </button>
+                    );
+                  })}
+                </div>
+              </article>
             </section>
 
             <section className="grid two">

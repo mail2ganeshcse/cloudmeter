@@ -25,8 +25,11 @@ input {
   display: grid;
   grid-template-columns: 280px 1fr;
   background:
-    radial-gradient(circle at top left, rgba(255, 183, 76, 0.18), transparent 28rem),
+    linear-gradient(90deg, rgba(19, 35, 31, 0.06) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(19, 35, 31, 0.05) 1px, transparent 1px),
+    radial-gradient(circle at top left, rgba(255, 183, 76, 0.16), transparent 26rem),
     linear-gradient(135deg, #eef3ef 0%, #f7faf5 42%, #e8f2f1 100%);
+  background-size: 46px 46px, 46px 46px, auto, auto;
 }
 
 .sidebar {
@@ -34,7 +37,9 @@ input {
   top: 0;
   height: 100vh;
   padding: 24px 18px;
-  background: #13231f;
+  background:
+    linear-gradient(180deg, rgba(156, 237, 200, 0.08), transparent 22rem),
+    #13231f;
   color: #eaf2ed;
   display: flex;
   flex-direction: column;
@@ -117,6 +122,7 @@ input {
 .workspace {
   padding: 22px;
   min-width: 0;
+  position: relative;
 }
 
 .topbar {
@@ -977,7 +983,8 @@ input {
   gap: 16px;
   align-items: center;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.82);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(244, 250, 247, 0.78));
   border: 1px solid rgba(16, 32, 28, 0.09);
   box-shadow: 0 18px 45px rgba(16, 32, 28, 0.06);
 }
@@ -1009,6 +1016,56 @@ input {
   border-radius: 8px;
   color: #10201c;
   background: linear-gradient(135deg, #9cedc8, #f5bd4f);
+}
+
+.cockpit-strip {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.cockpit-card {
+  min-height: 108px;
+  padding: 14px;
+  display: grid;
+  align-content: space-between;
+  border: 1px solid rgba(16, 32, 28, 0.09);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 14px 34px rgba(16, 32, 28, 0.05);
+}
+
+.cockpit-card span,
+.cockpit-card small {
+  color: #66756f;
+  font-weight: 800;
+}
+
+.cockpit-card strong {
+  margin-top: 4px;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.cockpit-card.good {
+  border-color: rgba(18, 114, 79, 0.2);
+  background: linear-gradient(135deg, #ffffff, #e9fbf2);
+}
+
+.cockpit-card.gold {
+  border-color: rgba(184, 119, 15, 0.22);
+  background: linear-gradient(135deg, #ffffff, #fff5dc);
+}
+
+.cockpit-card.hot {
+  border-color: rgba(167, 56, 41, 0.22);
+  background: linear-gradient(135deg, #ffffff, #ffece8);
+}
+
+.cockpit-card.watch {
+  border-color: rgba(63, 123, 234, 0.22);
+  background: linear-gradient(135deg, #ffffff, #edf4ff);
 }
 
 .feature-list {
@@ -1171,6 +1228,110 @@ h1 {
 
 .stats-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.command-grid {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.8fr);
+  gap: 16px;
+}
+
+.pipeline-panel {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(239, 249, 244, 0.82));
+}
+
+.pipeline-track {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pipeline-step {
+  min-height: 164px;
+  padding: 14px;
+  display: grid;
+  align-content: space-between;
+  border-radius: 8px;
+  color: #173c30;
+  background: #ffffff;
+  border: 1px solid rgba(16, 32, 28, 0.08);
+}
+
+.pipeline-step > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.pipeline-step em {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #10201c;
+  background: #9cedc8;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.pipeline-step span {
+  color: #66756f;
+  line-height: 1.4;
+}
+
+.pipeline-step b {
+  font-size: 18px;
+}
+
+.action-panel {
+  background:
+    linear-gradient(155deg, rgba(16, 32, 28, 0.95), rgba(20, 69, 67, 0.88));
+  color: #edf7f1;
+}
+
+.action-panel .panel-head span {
+  color: rgba(237, 247, 241, 0.62);
+}
+
+.action-tiles {
+  display: grid;
+  gap: 10px;
+}
+
+.action-tiles button {
+  min-height: 72px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 4px 10px;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: #edf7f1;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  text-align: left;
+}
+
+.action-tiles button:hover {
+  background: rgba(156, 237, 200, 0.15);
+}
+
+.action-tiles button svg {
+  grid-row: span 2;
+  color: #9cedc8;
+}
+
+.action-tiles button span {
+  font-weight: 900;
+}
+
+.action-tiles button small {
+  color: rgba(237, 247, 241, 0.68);
+  line-height: 1.35;
 }
 
 .onboarding-panel {
@@ -1610,6 +1771,8 @@ td:last-child {
 
   .hero,
   .stats-grid,
+  .cockpit-strip,
+  .command-grid,
   .two,
   .main-grid,
   .onboarding-panel,
@@ -1639,6 +1802,10 @@ td:last-child {
 
   .cloud-grid,
   .db-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pipeline-track {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1787,6 +1954,12 @@ td:last-child {
   }
 
   .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cockpit-strip,
+  .pipeline-track,
+  .command-grid {
     grid-template-columns: 1fr;
   }
 
