@@ -59,7 +59,7 @@ def money(value: float | None) -> int:
     return round(value or 0)
 
 
-EC2_HOURLY_USD = {
+CLOUD_INSTANCE_HOURLY_USD = {
     "t2.micro": 0.0116,
     "t2.small": 0.023,
     "t2.medium": 0.0464,
@@ -87,8 +87,8 @@ USD_TO_INR = 83
 
 def estimate_node_hourly_inr(instance_type: str, cpu_allocatable: float, memory_gib: float) -> float:
     normalized_type = (instance_type or "").strip().lower()
-    if normalized_type in EC2_HOURLY_USD:
-        return round(EC2_HOURLY_USD[normalized_type] * USD_TO_INR, 2)
+    if normalized_type in CLOUD_INSTANCE_HOURLY_USD:
+        return round(CLOUD_INSTANCE_HOURLY_USD[normalized_type] * USD_TO_INR, 2)
     return round((cpu_allocatable * 2.8) + (memory_gib * 0.35), 2)
 
 
@@ -1155,7 +1155,7 @@ spec:
                 pod_count="$(kubectl get pods -A --no-headers 2>/dev/null | wc -l | tr -d ' ')"
                 pod_counts="$(kubectl get pods -A --no-headers 2>/dev/null | awk '{count[$1]++} END {for (ns in count) print ns, count[ns]}')"
                 metrics="$(kubectl top pods -A --no-headers 2>/dev/null || true)"
-                nodes_json="$(kubectl get nodes -o custom-columns=NAME:.metadata.name,TYPE:.metadata.labels.node\\.kubernetes\\.io/instance-type,ZONE:.metadata.labels.topology\\.kubernetes\\.io/zone,CPU:.status.allocatable.cpu,MEMORY:.status.allocatable.memory,PROVIDER:.spec.providerID --no-headers 2>/dev/null | awk '
+                nodes_json="$(kubectl get nodes -o custom-columns=NAME:.metadata.name,TYPE:.metadata.labels.node\\.kubernetes\\.io/instance-type,BETA_TYPE:.metadata.labels.beta\\.kubernetes\\.io/instance-type,ZONE:.metadata.labels.topology\\.kubernetes\\.io/zone,BETA_ZONE:.metadata.labels.failure-domain\\.beta\\.kubernetes\\.io/zone,CPU:.status.allocatable.cpu,MEMORY:.status.allocatable.memory,PROVIDER:.spec.providerID --no-headers 2>/dev/null | awk '
                   function cpu(v) {
                     if (v ~ /n$/) return substr(v,1,length(v)-1)/1000000000;
                     if (v ~ /u$/) return substr(v,1,length(v)-1)/1000000;
@@ -1169,9 +1169,10 @@ spec:
                     return 0;
                   }
                   function clean(v) { if (v == "<none>" || v == "") return "unknown"; gsub(/"/, "", v); return v; }
-                  NF >= 5 {
+                  function first_known(a, b) { a=clean(a); b=clean(b); return a != "unknown" ? a : b; }
+                  NF >= 7 {
                     if (!first_seen) { first_seen=1 } else { printf "," }
-                    printf "{\\"name\\":\\"%s\\",\\"instance_type\\":\\"%s\\",\\"zone\\":\\"%s\\",\\"cpu_allocatable\\":%.3f,\\"memory_mib\\":%.3f,\\"provider_id\\":\\"%s\\"}", clean($1), clean($2), clean($3), cpu($4), mem($5), clean($6);
+                    printf "{\\"name\\":\\"%s\\",\\"instance_type\\":\\"%s\\",\\"zone\\":\\"%s\\",\\"cpu_allocatable\\":%.3f,\\"memory_mib\\":%.3f,\\"provider_id\\":\\"%s\\"}", clean($1), first_known($2, $3), first_known($4, $5), cpu($6), mem($7), clean($8);
                   }')"
                 namespaces_json=""
                 pods_json=""

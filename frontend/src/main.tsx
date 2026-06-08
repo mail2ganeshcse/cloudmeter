@@ -793,7 +793,7 @@ function App() {
     { label: "Connected clusters", value: k8sClusters ? `${k8sClusters}` : "Waiting", detail: verifiedConnectorCluster ? `Latest: ${verifiedConnectorCluster.clusterName}` : "Verify an installed agent" },
     { label: "Live namespaces", value: k8sNamespaces ? `${k8sNamespaces}` : "0", detail: "Chargeback groups" },
     { label: "Pod rows", value: liveKubernetesRows ? `${liveKubernetesRows}` : "0", detail: "CPU and RAM metering" },
-    { label: "Node inventory", value: data.nodeInventory?.length ? `${data.nodeInventory.length}` : "Pending", detail: "EC2 type and capacity capture" },
+    { label: "Node inventory", value: data.nodeInventory?.length ? `${data.nodeInventory.length}` : "Pending", detail: "Node type and capacity capture" },
     { label: "Network rows", value: k8sNetworkRows ? `${k8sNetworkRows}` : "0", detail: "RX/TX telemetry" },
   ];
   const readyInvoices = data.invoices.filter((invoice) => String(invoice.status) === "ready").length;
@@ -847,7 +847,7 @@ function App() {
     {
       label: "Node intelligence",
       value: data.nodeInventory?.length ? `${data.nodeInventory.length}` : "Pending",
-      detail: data.nodeInventory?.length ? "EC2 node types and hourly rates captured" : "Update agent to collect node cost",
+      detail: data.nodeInventory?.length ? "Node types and hourly rates captured" : "Update agent to collect node cost",
       tone: data.nodeInventory?.length ? "good" : "warn",
       icon: Cpu,
     },
@@ -1424,7 +1424,7 @@ function App() {
                   </div>
                 </div>
                 <div className="k8s-feature-strip">
-                  {["CPU millicores", "RAM working set", "Node EC2 type", "Network RX/TX", "Storage when connected"].map((item) => (
+                  {["CPU millicores", "RAM working set", "Node type", "Network RX/TX", "Storage when connected"].map((item) => (
                     <label key={item}><CheckCircle2 size={15} /> {item}</label>
                   ))}
                 </div>
@@ -1469,7 +1469,7 @@ function App() {
 
             <section className="grid two">
               <article className="panel k8s-node-panel">
-                <div className="panel-head"><div><span>Node Cost</span><h2>AWS EC2 node type and allocatable capacity</h2></div><Cpu size={22} /></div>
+                <div className="panel-head"><div><span>Node Cost</span><h2>Node type and allocatable capacity</h2></div><Cpu size={22} /></div>
                 <div className="table-shell k8s-table-shell">
                   <table className="k8s-table node-table">
                     <thead><tr><th>Cluster</th><th>Node</th><th>Instance</th><th>Zone</th><th>CPU</th><th>Memory</th><th>Hourly</th><th>Monthly</th></tr></thead>
@@ -1490,7 +1490,7 @@ function App() {
                           </tr>
                         );
                       }) : (
-                        <tr><td colSpan={8}><span className="empty-state">Node inventory will appear after reinstalling or updating the CloudMeter agent.</span></td></tr>
+                        <tr><td colSpan={8}><span className="empty-state">Node inventory will appear after reinstalling or updating the CloudMeter agent. Managed clusters usually expose node type labels; self-managed clusters may use fallback CPU/RAM pricing.</span></td></tr>
                       )}
                     </tbody>
                   </table>
