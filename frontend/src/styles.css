@@ -1634,6 +1634,24 @@ td:last-child {
   margin-bottom: 7px;
 }
 
+.k8s-owner small {
+  display: block;
+  margin-top: 7px;
+  color: #66756f;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.empty-state {
+  display: block;
+  padding: 12px;
+  border-radius: 8px;
+  color: #52635d;
+  background: #f2f7f3;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
 .alert {
   padding: 13px;
   border-radius: 8px;

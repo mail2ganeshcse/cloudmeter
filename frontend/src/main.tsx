@@ -665,12 +665,28 @@ function App() {
   const maxProvider = useMemo(() => Math.max(...data.cloudProviders.map((p) => p.amount), 1), [data.cloudProviders]);
   const maxAi = useMemo(() => Math.max(...data.aiProviders.map((p) => p.amount), 1), [data.aiProviders]);
   const maxTeam = useMemo(() => Math.max(...data.teamChargeback.map((p) => p.amount), 1), [data.teamChargeback]);
-  const k8sRows = data.kubernetes;
+  const k8sRows = data.kubernetes.filter((row) => String(row.source) === "live");
+  const k8sChargeback = useMemo(() => {
+    const owners = new Map<string, { namespace: string; cluster: string; amount: number; cpu: number; memory: number; pods: number }>();
+    k8sRows.forEach((row) => {
+      const namespace = String(row.namespace ?? "unknown");
+      const cluster = String(row.cluster ?? "cluster");
+      const key = `${cluster}:${namespace}`;
+      const current = owners.get(key) ?? { namespace, cluster, amount: 0, cpu: 0, memory: 0, pods: 0 };
+      current.amount += Number(row.amount ?? 0);
+      current.cpu += Number(row.cpu ?? 0);
+      current.memory += Number(row.memory ?? 0);
+      current.pods += String(row.workload ?? "").startsWith("pod/") ? 1 : 0;
+      owners.set(key, current);
+    });
+    return Array.from(owners.values()).sort((a, b) => b.amount - a.amount);
+  }, [k8sRows]);
+  const maxK8sChargeback = Math.max(...k8sChargeback.map((item) => item.amount), 1);
   const aiRows = data.aiUsage.slice(0, 6);
   const isSuperadmin = session?.session.role === "superadmin";
   const limited = session?.session.role !== "admin" && !isSuperadmin;
   const connectorCluster = generatedConnectorCluster ?? onboarding?.clusters?.find((cluster) => cluster.clusterName === connectorClusterName) ?? null;
-  const liveKubernetesRows = data.kubernetes.filter((row) => String(row.source) === "live").length;
+  const liveKubernetesRows = k8sRows.length;
   const networkNamespaces = new Set((data.networkUsage ?? []).map((row) => `${row.cluster}:${row.namespace}`)).size;
   const readyInvoices = data.invoices.filter((invoice) => String(invoice.status) === "ready").length;
   const activeAlerts = data.alerts.length;
@@ -1164,23 +1180,26 @@ function App() {
                 <table>
                   <thead><tr><th>Cluster</th><th>Namespace</th><th>Workload</th><th>CPU</th><th>Memory</th><th>Source</th><th>Cost</th></tr></thead>
                   <tbody>
-                    {k8sRows.map((row) => (
-                      <tr key={`${row.namespace}-${row.workload}`}>
+                    {k8sRows.length ? k8sRows.map((row) => (
+                      <tr key={`${row.cluster}-${row.namespace}-${row.workload}`}>
                         <td>{row.cluster}</td><td>{row.namespace}</td><td>{row.workload}</td><td>{compact(Number(row.cpu))} cores</td><td>{compact(Number(row.memory))} GiB</td><td><span className={`source-pill ${String(row.source)}`}>{row.source}</span></td><td>{formatInr(Number(row.amount))}</td>
                       </tr>
-                    ))}
+                    )) : (
+                      <tr><td colSpan={7}><span className="empty-state">Waiting for live pod-level costing from the CloudMeter agent.</span></td></tr>
+                    )}
                   </tbody>
                 </table>
               </article>
               <article className="panel">
-                <div className="panel-head"><div><span>Chargeback</span><h2>Owners</h2></div><Banknote size={22} /></div>
+                <div className="panel-head"><div><span>Chargeback</span><h2>Namespace owners</h2></div><Banknote size={22} /></div>
                 <div className="chargeback">
-                  {data.teamChargeback.slice(0, 8).map((item) => (
-                    <div key={item.team}>
-                      <label>{item.team}<strong>{formatInr(item.amount)}</strong></label>
-                      <Bar value={item.amount} max={maxTeam} />
+                  {k8sChargeback.length ? k8sChargeback.map((item) => (
+                    <div className="k8s-owner" key={`${item.cluster}-${item.namespace}`}>
+                      <label>{item.namespace}<strong>{formatInr(item.amount)}</strong></label>
+                      <Bar value={item.amount} max={maxK8sChargeback} />
+                      <small>{item.cluster} · {item.pods || "namespace"} pods · {compact(item.cpu)} cores · {compact(item.memory)} GiB RAM</small>
                     </div>
-                  ))}
+                  )) : <p className="empty-state">No live namespace chargeback yet. Run the agent and verify the cluster.</p>}
                 </div>
               </article>
             </section>
