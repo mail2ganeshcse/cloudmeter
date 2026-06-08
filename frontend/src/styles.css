@@ -1773,6 +1773,198 @@ h1 {
   gap: 16px;
 }
 
+.compute-panel {
+  margin-top: 16px;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(18, 114, 79, 0.09), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 251, 249, 0.92));
+}
+
+.compute-cluster-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.compute-card,
+.network-cluster-card,
+.network-intel-card {
+  min-width: 0;
+  border: 1px solid rgba(16, 32, 28, 0.09);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 14px 34px rgba(16, 32, 28, 0.06);
+}
+
+.compute-card {
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+}
+
+.compute-card-head,
+.network-intel-head {
+  min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.compute-card-head strong,
+.network-cluster-card strong,
+.network-intel-card strong {
+  display: block;
+  color: #10201c;
+  font-size: 17px;
+  font-weight: 950;
+  overflow-wrap: anywhere;
+}
+
+.compute-card-head span,
+.network-cluster-card span,
+.network-intel-card span,
+.compute-price span {
+  display: block;
+  margin-top: 4px;
+  color: #61746c;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.compute-price {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.compute-price strong {
+  color: #12724f;
+}
+
+.capacity-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.capacity-block {
+  min-width: 0;
+  padding: 12px;
+  display: grid;
+  gap: 9px;
+  border-radius: 8px;
+  background: #f6faf8;
+  border: 1px solid rgba(16, 32, 28, 0.07);
+}
+
+.storage-block {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, #f8fbf9, #fff7df);
+}
+
+.storage-block p {
+  margin: 0;
+  color: #61746c;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.capacity-title {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
+}
+
+.capacity-title svg {
+  color: #12724f;
+}
+
+.capacity-title strong {
+  color: #10201c;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.capacity-title span {
+  color: #6a7d75;
+  font-size: 11px;
+  font-weight: 850;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.capacity-row {
+  display: grid;
+  grid-template-columns: 76px minmax(72px, 1fr) minmax(74px, auto) 44px;
+  gap: 8px;
+  align-items: center;
+  color: #52635d;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.capacity-row > span {
+  overflow-wrap: anywhere;
+}
+
+.capacity-row strong {
+  color: #10201c;
+  font-size: 12px;
+  font-weight: 950;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.capacity-row strong small {
+  display: block;
+  color: #66776f;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.capacity-row b {
+  color: #60736b;
+  font-size: 11px;
+  text-align: right;
+}
+
+.capacity-bar {
+  height: 8px;
+  border-radius: 99px;
+  background: #e3ebe6;
+  overflow: hidden;
+}
+
+.capacity-bar i,
+.capacity-bar em {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #139868, #f2bb4d);
+}
+
+.capacity-row.good .capacity-bar i {
+  background: linear-gradient(90deg, #28b47e, #9cedc8);
+}
+
+.capacity-row.warn .capacity-bar i {
+  background: linear-gradient(90deg, #f2bb4d, #df6148);
+}
+
+.capacity-row.muted {
+  color: #7b8983;
+}
+
+.capacity-row.muted .capacity-bar em {
+  width: 100%;
+  background: repeating-linear-gradient(90deg, #dce5e0 0 8px, #edf3ef 8px 14px);
+}
+
 .k8s-cost-panel,
 .k8s-network-panel {
   overflow: hidden;
@@ -1969,6 +2161,53 @@ h1 {
 
 .k8s-network-panel {
   margin-top: 16px;
+}
+
+.network-intelligence-panel {
+  margin-top: 16px;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(44, 128, 206, 0.08), transparent 36%),
+    rgba(255, 255, 255, 0.88);
+}
+
+.network-summary-grid,
+.network-intel-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.network-summary-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 12px;
+}
+
+.network-intel-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.network-cluster-card,
+.network-intel-card {
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.network-cluster-card label {
+  color: #12724f;
+  font-size: 24px;
+  font-weight: 950;
+}
+
+.network-intel-head em {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-radius: 99px;
+  color: #173c30;
+  background: #dff8ec;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 950;
 }
 
 .k8s-node-panel {
@@ -2344,6 +2583,9 @@ td:last-child {
   .cockpit-strip,
   .kubernetes-health,
   .kubernetes-layout,
+  .compute-cluster-grid,
+  .network-summary-grid,
+  .network-intel-grid,
   .command-grid,
   .two,
   .main-grid,
@@ -2593,6 +2835,10 @@ td:last-child {
   }
 
   .k8s-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .capacity-columns {
     grid-template-columns: 1fr;
   }
 

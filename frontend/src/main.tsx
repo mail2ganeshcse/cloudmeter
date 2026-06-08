@@ -232,6 +232,13 @@ function formatMemory(gib: number) {
   return { value: gib.toFixed(gib < 10 ? 2 : 1), unit: "GiB" };
 }
 
+function clampPercent(value: number, max: number) {
+  if (!max || value <= 0) {
+    return 0;
+  }
+  return Math.min(100, Math.max(0, (value / max) * 100));
+}
+
 function roleLabel(role: string) {
   if (role === "admin") {
     return "Workspace Admin";
@@ -256,6 +263,20 @@ function Stat({ icon: Icon, label, value, signal }: { icon: any; label: string; 
         <span>{signal}</span>
       </div>
     </article>
+  );
+}
+
+function CapacityRow({ label, value, unit, percent, tone = "normal" }: { label: string; value: string; unit?: string; percent?: number; tone?: "normal" | "good" | "warn" | "muted" }) {
+  const width = percent === undefined ? 0 : Math.max(2, percent);
+  return (
+    <div className={`capacity-row ${tone}`}>
+      <span>{label}</span>
+      <div className="capacity-bar" aria-hidden="true">
+        {percent === undefined ? <em /> : <i style={{ width: `${width}%` }} />}
+      </div>
+      <strong>{value}{unit && <small>{unit}</small>}</strong>
+      {percent !== undefined && <b>{percent.toFixed(percent < 10 ? 1 : 0)}%</b>}
+    </div>
   );
 }
 
@@ -794,6 +815,120 @@ function App() {
     if (k8sCostBasis === "node") return nodeCost;
     return cpuCost + memoryCost + networkCost + storageCost + nodeCost;
   };
+  const clusterComputeSummary = useMemo(() => {
+    const clusters = new Map<string, {
+      cluster: string;
+      nodes: number;
+      pods: number;
+      monthlyCost: number;
+      fallbackCost: number;
+      cpuUsed: number;
+      cpuRequested: number;
+      cpuRequestedKnown: boolean;
+      cpuAllocatable: number;
+      cpuProvisioned: number;
+      memoryUsed: number;
+      memoryRequested: number;
+      memoryRequestedKnown: boolean;
+      memoryAllocatable: number;
+      memoryProvisioned: number;
+      storageProvisioned: number;
+      storageRequested: number;
+      storageKnown: boolean;
+      rxBytesPerSec: number;
+      txBytesPerSec: number;
+    }>();
+    const ensureCluster = (clusterName: string) => {
+      const cluster = clusterName || "cluster";
+      const current = clusters.get(cluster);
+      if (current) {
+        return current;
+      }
+      const next = {
+        cluster,
+        nodes: 0,
+        pods: 0,
+        monthlyCost: 0,
+        fallbackCost: 0,
+        cpuUsed: 0,
+        cpuRequested: 0,
+        cpuRequestedKnown: false,
+        cpuAllocatable: 0,
+        cpuProvisioned: 0,
+        memoryUsed: 0,
+        memoryRequested: 0,
+        memoryRequestedKnown: false,
+        memoryAllocatable: 0,
+        memoryProvisioned: 0,
+        storageProvisioned: 0,
+        storageRequested: 0,
+        storageKnown: false,
+        rxBytesPerSec: 0,
+        txBytesPerSec: 0,
+      };
+      clusters.set(cluster, next);
+      return next;
+    };
+
+    (data.nodeInventory ?? []).forEach((node) => {
+      const summary = ensureCluster(String(node.cluster ?? "cluster"));
+      const allocatableCpu = Number(node.cpuAllocatable ?? 0);
+      const provisionedCpu = Number(node.cpuCapacity ?? node.cpuProvisioned ?? node.capacityCpu ?? allocatableCpu);
+      const allocatableMemory = Number(node.memoryGib ?? 0);
+      const provisionedMemory = Number(node.memoryCapacityGib ?? node.memoryProvisionedGib ?? node.capacityMemoryGib ?? allocatableMemory);
+      const storage = Number(node.storageGib ?? node.ephemeralStorageGib ?? node.storageProvisionedGib ?? 0);
+      summary.nodes += 1;
+      summary.monthlyCost += Number(node.monthlyInr ?? 0);
+      summary.cpuAllocatable += allocatableCpu;
+      summary.cpuProvisioned += provisionedCpu;
+      summary.memoryAllocatable += allocatableMemory;
+      summary.memoryProvisioned += provisionedMemory;
+      summary.storageProvisioned += storage;
+      summary.storageKnown = summary.storageKnown || storage > 0;
+    });
+
+    k8sRows.forEach((row) => {
+      const summary = ensureCluster(String(row.cluster ?? "cluster"));
+      summary.pods += String(row.workload ?? "").startsWith("pod/") ? 1 : 0;
+      summary.cpuUsed += Number(row.cpu ?? 0);
+      summary.memoryUsed += Number(row.memory ?? 0);
+      summary.fallbackCost += Number(row.amount ?? 0);
+      const requestedCpu = Number(row.cpuRequest ?? row.cpuRequested ?? 0);
+      const requestedMemory = Number(row.memoryRequestGib ?? row.memoryRequestedGib ?? row.memoryRequest ?? 0);
+      const requestedStorage = Number(row.storageGiB ?? row.storageRequestedGib ?? 0);
+      if (requestedCpu > 0) {
+        summary.cpuRequested += requestedCpu;
+        summary.cpuRequestedKnown = true;
+      }
+      if (requestedMemory > 0) {
+        summary.memoryRequested += requestedMemory;
+        summary.memoryRequestedKnown = true;
+      }
+      if (requestedStorage > 0) {
+        summary.storageRequested += requestedStorage;
+        summary.storageKnown = true;
+      }
+    });
+
+    (data.networkUsage ?? []).forEach((row) => {
+      const summary = ensureCluster(String(row.cluster ?? "cluster"));
+      summary.rxBytesPerSec += Number(row.rxBytesPerSec ?? 0);
+      summary.txBytesPerSec += Number(row.txBytesPerSec ?? 0);
+    });
+
+    return Array.from(clusters.values())
+      .map((summary) => ({
+        ...summary,
+        monthlyCost: summary.monthlyCost || summary.fallbackCost,
+      }))
+      .filter((summary) => summary.nodes || summary.pods || summary.rxBytesPerSec || summary.txBytesPerSec)
+      .sort((a, b) => b.monthlyCost - a.monthlyCost);
+  }, [data.nodeInventory, data.networkUsage, k8sRows]);
+  const topNetworkIntelligence = useMemo(() => [...(data.networkUsage ?? [])]
+    .sort((a, b) => (Number(b.rxBytesPerSec ?? 0) + Number(b.txBytesPerSec ?? 0)) - (Number(a.rxBytesPerSec ?? 0) + Number(a.txBytesPerSec ?? 0)))
+    .slice(0, 6), [data.networkUsage]);
+  const maxClusterComputeCost = Math.max(...clusterComputeSummary.map((cluster) => cluster.monthlyCost), 1);
+  const maxNetworkThroughput = Math.max(...topNetworkIntelligence.map((row) => Number(row.rxBytesPerSec ?? 0) + Number(row.txBytesPerSec ?? 0)), 1);
   const filteredK8sTotal = filteredK8sRows.reduce((sum, row) => sum + costForK8sRow(row), 0);
   const kubernetesSignals = [
     { label: "Connected clusters", value: k8sClusters ? `${k8sClusters}` : "Waiting", detail: verifiedConnectorCluster ? `Latest: ${verifiedConnectorCluster.clusterName}` : "Verify an installed agent" },
@@ -1463,6 +1598,63 @@ function App() {
               <Stat icon={Brain} label="AI model cost" value={formatInr(data.metrics.ai_spend_inr)} signal="Tokens, requests, GPU" />
             </section>
 
+            <section className="panel compute-panel">
+              <div className="panel-head"><div><span>Compute Cost</span><h2>Per-cluster capacity and monthly run rate</h2></div><Cpu size={22} /></div>
+              <div className="compute-cluster-grid">
+                {clusterComputeSummary.length ? clusterComputeSummary.map((cluster) => {
+                  const cpuUsed = formatCpu(cluster.cpuUsed);
+                  const cpuRequested = cluster.cpuRequestedKnown ? formatCpu(cluster.cpuRequested) : null;
+                  const cpuAllocatable = formatCpu(cluster.cpuAllocatable);
+                  const cpuOverheadValue = Math.max(cluster.cpuProvisioned - cluster.cpuAllocatable, 0);
+                  const cpuOverhead = formatCpu(cpuOverheadValue);
+                  const memoryUsed = formatMemory(cluster.memoryUsed);
+                  const memoryRequested = cluster.memoryRequestedKnown ? formatMemory(cluster.memoryRequested) : null;
+                  const memoryAllocatable = formatMemory(cluster.memoryAllocatable);
+                  const memoryOverheadValue = Math.max(cluster.memoryProvisioned - cluster.memoryAllocatable, 0);
+                  const memoryOverhead = formatMemory(memoryOverheadValue);
+                  return (
+                    <article className="compute-card" key={cluster.cluster}>
+                      <div className="compute-card-head">
+                        <div>
+                          <strong>{cluster.cluster}</strong>
+                          <span>{cluster.nodes || "No"} nodes · {cluster.pods || "No"} pods · {formatBytesPerSec(cluster.rxBytesPerSec + cluster.txBytesPerSec)} traffic</span>
+                        </div>
+                        <div className="compute-price">
+                          <strong>{formatInr(cluster.monthlyCost)}</strong>
+                          <span>/ month</span>
+                        </div>
+                      </div>
+                      <Bar value={cluster.monthlyCost} max={maxClusterComputeCost} />
+                      <div className="capacity-columns">
+                        <div className="capacity-block">
+                          <div className="capacity-title"><Cpu size={16} /><strong>CPU</strong><span>{cpuAllocatable.value} {cpuAllocatable.unit} allocatable</span></div>
+                          <CapacityRow label="Used" value={cpuUsed.value} unit={cpuUsed.unit} percent={clampPercent(cluster.cpuUsed, cluster.cpuAllocatable)} tone="good" />
+                          <CapacityRow label="Requested" value={cpuRequested?.value ?? "--"} unit={cpuRequested?.unit} percent={cluster.cpuRequestedKnown ? clampPercent(cluster.cpuRequested, cluster.cpuAllocatable) : undefined} tone={cluster.cpuRequestedKnown ? "normal" : "muted"} />
+                          <CapacityRow label="Allocatable" value={cpuAllocatable.value} unit={cpuAllocatable.unit} percent={clampPercent(cluster.cpuAllocatable, Math.max(cluster.cpuProvisioned, cluster.cpuAllocatable))} />
+                          <CapacityRow label="Overhead" value={cpuOverhead.value} unit={cpuOverhead.unit} percent={clampPercent(cpuOverheadValue, Math.max(cluster.cpuProvisioned, cluster.cpuAllocatable))} tone="warn" />
+                        </div>
+                        <div className="capacity-block">
+                          <div className="capacity-title"><Database size={16} /><strong>Memory</strong><span>{memoryAllocatable.value} {memoryAllocatable.unit} allocatable</span></div>
+                          <CapacityRow label="Used" value={memoryUsed.value} unit={memoryUsed.unit} percent={clampPercent(cluster.memoryUsed, cluster.memoryAllocatable)} tone="good" />
+                          <CapacityRow label="Requested" value={memoryRequested?.value ?? "--"} unit={memoryRequested?.unit} percent={cluster.memoryRequestedKnown ? clampPercent(cluster.memoryRequested, cluster.memoryAllocatable) : undefined} tone={cluster.memoryRequestedKnown ? "normal" : "muted"} />
+                          <CapacityRow label="Allocatable" value={memoryAllocatable.value} unit={memoryAllocatable.unit} percent={clampPercent(cluster.memoryAllocatable, Math.max(cluster.memoryProvisioned, cluster.memoryAllocatable))} />
+                          <CapacityRow label="Overhead" value={memoryOverhead.value} unit={memoryOverhead.unit} percent={clampPercent(memoryOverheadValue, Math.max(cluster.memoryProvisioned, cluster.memoryAllocatable))} tone="warn" />
+                        </div>
+                        <div className="capacity-block storage-block">
+                          <div className="capacity-title"><Layers3 size={16} /><strong>Storage</strong><span>Persistent and ephemeral capacity</span></div>
+                          <CapacityRow label="Provisioned" value={cluster.storageKnown ? compact(cluster.storageProvisioned) : "--"} unit={cluster.storageKnown ? "GiB" : undefined} percent={cluster.storageKnown ? 100 : undefined} />
+                          <CapacityRow label="Requested" value={cluster.storageKnown ? compact(cluster.storageRequested) : "--" } unit={cluster.storageKnown ? "GiB" : undefined} percent={cluster.storageKnown ? clampPercent(cluster.storageRequested, cluster.storageProvisioned) : undefined} tone={cluster.storageKnown ? "normal" : "muted"} />
+                          <p>Storage appears once the agent reports PVC, volume, or node ephemeral capacity.</p>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                }) : (
+                  <p className="empty-state">Compute cost charts will appear after a cluster posts node inventory and pod metrics.</p>
+                )}
+              </div>
+            </section>
+
             <section className="grid two">
               <article className="panel">
                 <div className="panel-head"><div><span>Cloud Cost</span><h2>Provider ledger</h2></div><Cloud size={22} /></div>
@@ -1631,6 +1823,42 @@ function App() {
                   <small>{signal.detail}</small>
                 </article>
               ))}
+            </section>
+
+            <section className="panel network-intelligence-panel">
+              <div className="panel-head"><div><span>Network Intelligence</span><h2>Traffic leaders and cluster throughput</h2></div><Activity size={22} /></div>
+              <div className="network-summary-grid">
+                {clusterComputeSummary.length ? clusterComputeSummary.map((cluster) => (
+                  <article className="network-cluster-card" key={`network-${cluster.cluster}`}>
+                    <div>
+                      <strong>{cluster.cluster}</strong>
+                      <span>{cluster.pods || "No"} pods reporting</span>
+                    </div>
+                    <label>{formatBytesPerSec(cluster.rxBytesPerSec + cluster.txBytesPerSec)}</label>
+                    <CapacityRow label="Ingress" value={formatBytesPerSec(cluster.rxBytesPerSec)} percent={clampPercent(cluster.rxBytesPerSec, cluster.rxBytesPerSec + cluster.txBytesPerSec)} tone="good" />
+                    <CapacityRow label="Egress" value={formatBytesPerSec(cluster.txBytesPerSec)} percent={clampPercent(cluster.txBytesPerSec, cluster.rxBytesPerSec + cluster.txBytesPerSec)} />
+                  </article>
+                )) : <p className="empty-state">Cluster throughput cards appear after the network collector posts metrics.</p>}
+              </div>
+              <div className="network-intel-grid">
+                {topNetworkIntelligence.length ? topNetworkIntelligence.map((row) => {
+                  const totalTraffic = Number(row.rxBytesPerSec ?? 0) + Number(row.txBytesPerSec ?? 0);
+                  return (
+                    <article className="network-intel-card" key={`${row.cluster}-${row.namespace}-${row.workload}`}>
+                      <div className="network-intel-head">
+                        <div>
+                          <strong>{row.namespace}</strong>
+                          <span>{row.cluster} · {row.workload}</span>
+                        </div>
+                        <em>{row.source}</em>
+                      </div>
+                      <CapacityRow label="Total" value={formatBytesPerSec(totalTraffic)} percent={clampPercent(totalTraffic, maxNetworkThroughput)} tone="warn" />
+                      <CapacityRow label="RX" value={formatBytesPerSec(Number(row.rxBytesPerSec ?? 0))} percent={clampPercent(Number(row.rxBytesPerSec ?? 0), totalTraffic)} tone="good" />
+                      <CapacityRow label="TX" value={formatBytesPerSec(Number(row.txBytesPerSec ?? 0))} percent={clampPercent(Number(row.txBytesPerSec ?? 0), totalTraffic)} />
+                    </article>
+                  );
+                }) : null}
+              </div>
             </section>
 
             <section className="onboarding-panel k8s-onboarding-panel">
