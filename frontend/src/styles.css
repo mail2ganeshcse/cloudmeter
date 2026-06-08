@@ -1944,9 +1944,34 @@ td:last-child {
   margin-top: 16px;
 }
 
+.role-guide {
+  margin-bottom: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.role-guide span {
+  min-height: 48px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 3px;
+  border-radius: 8px;
+  color: #52635d;
+  background: #f5f8f6;
+  border: 1px solid rgba(16, 32, 28, 0.08);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.role-guide strong {
+  color: #10201c;
+  font-size: 13px;
+}
+
 .role-pill {
   display: inline-grid;
-  min-width: 76px;
+  min-width: 92px;
   place-items: center;
   padding: 4px 8px;
   border-radius: 99px;
@@ -1958,6 +1983,11 @@ td:last-child {
 .role-pill.superadmin {
   color: #10201c;
   background: #f5bd4f;
+}
+
+.role-pill.admin {
+  color: #173c30;
+  background: #bfead4;
 }
 
 .role-pill.viewer {
@@ -1978,6 +2008,11 @@ td:last-child {
 .role-select.superadmin {
   border-color: #d9a027;
   background: #fff8e6;
+}
+
+.role-select.admin {
+  border-color: #8fd8b7;
+  background: #eefaf4;
 }
 
 .role-select.viewer {
@@ -2256,6 +2291,10 @@ td:last-child {
   }
 
   .k8s-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .role-guide {
     grid-template-columns: 1fr;
   }
 

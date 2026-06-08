@@ -230,6 +230,16 @@ function formatMemory(gib: number) {
   return { value: gib.toFixed(gib < 10 ? 2 : 1), unit: "GiB" };
 }
 
+function roleLabel(role: string) {
+  if (role === "admin") {
+    return "Workspace Admin";
+  }
+  if (role === "superadmin") {
+    return "Superadmin";
+  }
+  return "Viewer";
+}
+
 function Bar({ value, max }: { value: number; max: number }) {
   return <span className="bar"><span style={{ width: `${Math.max(8, (value / max) * 100)}%` }} /></span>;
 }
@@ -1024,7 +1034,7 @@ function App() {
       })
       .then((body) => {
         setManagedUsers((current) => current.map((item) => (item.id === user.id ? body.user : item)));
-        setUsersMessage(`${body.user.email} is now ${body.user.role}.`);
+        setUsersMessage(`${body.user.email} is now ${roleLabel(body.user.role)}.`);
         if (session?.user.id === user.id) {
           fetch(`${apiUrl}/api/auth/me`, { credentials: "include" })
             .then((res) => (res.ok ? res.json() : null))
@@ -1087,7 +1097,7 @@ function App() {
             <Search size={18} />
             <input placeholder="Search customer, namespace, model, invoice..." />
           </div>
-          <button className="selector"><Building2 size={17} /> {limited ? "Limited workspace" : "All customers"} <ChevronDown size={16} /></button>
+          <button className="selector"><Building2 size={17} /> {session ? roleLabel(session.session.role) : "Workspace"} <ChevronDown size={16} /></button>
           <button className="primary" disabled={limited}><Sparkles size={17} /> Optimize plan</button>
           <button className="logout-button" onClick={logout}><LogOut size={17} /> Logout</button>
         </header>
@@ -1097,7 +1107,7 @@ function App() {
             <ShieldCheck size={18} />
             <span>
               {isSuperadmin
-                ? `${session.user.email} is the master superadmin account with full workspace and user-management access.`
+                ? `${session.user.email} is the master Superadmin account with full platform and user-management access.`
                 : `${session.user.email} is in limited mode: dashboard view, one cluster onboarding, read-only reports, no invoice sending.`}
             </span>
           </section>
@@ -1530,6 +1540,11 @@ function App() {
         {isSuperadmin && activeView === "User Management" && (
           <section className="panel user-management page-panel">
             <div className="panel-head"><div><span>Superadmin</span><h2>User Management</h2></div><Users size={22} /></div>
+            <div className="role-guide">
+              <span><strong>Viewer</strong> read-only self-service workspace</span>
+              <span><strong>Workspace Admin</strong> manages one company/workspace</span>
+              <span><strong>Superadmin</strong> controls the CloudMeter platform</span>
+            </div>
             {usersMessage && <p className="cluster-refresh-message">{usersMessage}</p>}
             {usersError ? (
               <p className="login-error">{usersError}</p>
@@ -1548,16 +1563,16 @@ function App() {
                           disabled={savingRoleUserId === user.id || user.email === "raashviroyal@gmail.com"}
                           onChange={(event) => updateManagedUserRole(user, event.target.value)}
                         >
-                          <option value="viewer">viewer</option>
-                          <option value="admin">admin</option>
-                          <option value="superadmin">superadmin</option>
+                          <option value="viewer">Viewer</option>
+                          <option value="admin">Workspace Admin</option>
+                          <option value="superadmin">Superadmin</option>
                         </select>
                       </td>
                       <td>{user.provider}</td>
                       <td>{user.sessions}</td>
                       <td>{new Date(user.lastLoginAt).toLocaleString()}</td>
                       <td>
-                        <span className={`role-pill ${user.role}`}>{savingRoleUserId === user.id ? "saving" : user.role}</span>
+                        <span className={`role-pill ${user.role}`}>{savingRoleUserId === user.id ? "Saving" : roleLabel(user.role)}</span>
                       </td>
                     </tr>
                   ))}
