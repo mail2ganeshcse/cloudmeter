@@ -1237,6 +1237,103 @@ h1 {
   gap: 16px;
 }
 
+.intelligence-panel {
+  margin-top: 16px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(245, 250, 247, 0.86));
+}
+
+.intelligence-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.intel-card {
+  min-height: 142px;
+  padding: 14px;
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  gap: 4px 10px;
+  align-content: start;
+  border-radius: 8px;
+  color: #10201c;
+  background: #ffffff;
+  border: 1px solid rgba(16, 32, 28, 0.08);
+}
+
+.intel-card svg {
+  grid-row: span 3;
+  color: #12724f;
+}
+
+.intel-card span,
+.intel-card small {
+  color: #60736b;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.intel-card strong {
+  margin-top: 4px;
+  font-size: 22px;
+  line-height: 1.08;
+  overflow-wrap: anywhere;
+}
+
+.intel-card.good {
+  background: #effbf5;
+  border-color: rgba(18, 114, 79, 0.16);
+}
+
+.intel-card.warn {
+  background: #fff8e8;
+  border-color: rgba(184, 119, 15, 0.18);
+}
+
+.intel-card.warn svg {
+  color: #b8770f;
+}
+
+.intel-card.danger {
+  background: #fff0ec;
+  border-color: rgba(167, 56, 41, 0.2);
+}
+
+.intel-card.danger svg {
+  color: #b94732;
+}
+
+.intel-card.quiet {
+  background: #f5f8f6;
+}
+
+.alarm-strip {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.alarm-strip button {
+  min-height: 38px;
+  border: 1px solid rgba(16, 32, 28, 0.1);
+  border-radius: 8px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #173c30;
+  background: #ffffff;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.alarm-strip button:hover {
+  background: #e9fbf2;
+}
+
 .pipeline-panel {
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(239, 249, 244, 0.82));
@@ -2099,6 +2196,10 @@ td:last-child {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .intelligence-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .kubernetes-health {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -2262,6 +2363,7 @@ td:last-child {
 
   .cockpit-strip,
   .kubernetes-health,
+  .intelligence-grid,
   .pipeline-track,
   .command-grid {
     grid-template-columns: 1fr;

@@ -798,6 +798,60 @@ function App() {
   ];
   const readyInvoices = data.invoices.filter((invoice) => String(invoice.status) === "ready").length;
   const activeAlerts = data.alerts.length;
+  const totalSpend = Number(data.metrics.total_spend_inr ?? 0);
+  const forecastSpend = Number(data.metrics.forecast_total_inr ?? 0);
+  const invoiceValue = Number(data.metrics.invoice_total_inr ?? 0);
+  const forecastDelta = forecastSpend - totalSpend;
+  const forecastDeltaPct = totalSpend ? Math.round((forecastDelta / totalSpend) * 100) : 0;
+  const highSeverityAlerts = data.alerts.filter((alert) => ["critical", "high"].includes(String(alert.severity))).length;
+  const noisyNetwork = [...(data.networkUsage ?? [])]
+    .sort((a, b) => (Number(b.rxBytesPerSec ?? 0) + Number(b.txBytesPerSec ?? 0)) - (Number(a.rxBytesPerSec ?? 0) + Number(a.txBytesPerSec ?? 0)))[0];
+  const highestK8sRow = [...k8sRows].sort((a, b) => Number(b.amount ?? 0) - Number(a.amount ?? 0))[0];
+  const invoiceGap = Math.max(invoiceValue - totalSpend, 0);
+  const intelligenceMetrics = [
+    {
+      label: "Forecast risk",
+      value: forecastDelta > 0 ? `+${forecastDeltaPct}%` : "Stable",
+      detail: forecastDelta > 0 ? `${formatInr(forecastDelta)} above captured spend` : "Forecast is aligned with captured spend",
+      tone: forecastDeltaPct > 20 ? "danger" : forecastDeltaPct > 8 ? "warn" : "good",
+      icon: LineChart,
+    },
+    {
+      label: "Alarm pressure",
+      value: `${highSeverityAlerts}/${activeAlerts}`,
+      detail: highSeverityAlerts ? "High priority alerts need review" : "No high severity alarms",
+      tone: highSeverityAlerts ? "danger" : activeAlerts ? "warn" : "good",
+      icon: AlertTriangle,
+    },
+    {
+      label: "Noisy namespace",
+      value: noisyNetwork ? String(noisyNetwork.namespace) : "None",
+      detail: noisyNetwork ? `${formatBytesPerSec(Number(noisyNetwork.rxBytesPerSec ?? 0) + Number(noisyNetwork.txBytesPerSec ?? 0))} traffic` : "No network traffic rows yet",
+      tone: noisyNetwork ? "warn" : "quiet",
+      icon: Activity,
+    },
+    {
+      label: "Top K8s cost",
+      value: highestK8sRow ? formatInr(Number(highestK8sRow.amount ?? 0)) : "Waiting",
+      detail: highestK8sRow ? `${highestK8sRow.namespace} / ${highestK8sRow.workload}` : "Agent snapshot pending",
+      tone: highestK8sRow ? "warn" : "quiet",
+      icon: Boxes,
+    },
+    {
+      label: "Invoice coverage",
+      value: invoiceValue ? `${Math.round((invoiceValue / Math.max(totalSpend, 1)) * 100)}%` : "0%",
+      detail: invoiceGap ? `${formatInr(invoiceGap)} margin over metered spend` : "No invoice gap detected",
+      tone: invoiceValue >= totalSpend ? "good" : "warn",
+      icon: Receipt,
+    },
+    {
+      label: "Node intelligence",
+      value: data.nodeInventory?.length ? `${data.nodeInventory.length}` : "Pending",
+      detail: data.nodeInventory?.length ? "EC2 node types and hourly rates captured" : "Update agent to collect node cost",
+      tone: data.nodeInventory?.length ? "good" : "warn",
+      icon: Cpu,
+    },
+  ];
   const cockpitSignals = [
     { label: "Live pods", value: liveKubernetesRows ? `${liveKubernetesRows}` : "Waiting", detail: "Kubernetes chargeback rows", tone: liveKubernetesRows ? "good" : "watch" },
     { label: "Network namespaces", value: networkNamespaces ? `${networkNamespaces}` : "None", detail: "RX/TX reporting scope", tone: networkNamespaces ? "good" : "watch" },
@@ -1175,6 +1229,28 @@ function App() {
               <Stat icon={Brain} label="AI tokens billed" value={compact(data.metrics.tokens)} signal={`${compact(data.metrics.requests)} requests`} />
               <Stat icon={Cpu} label="GPU metered" value={`${data.metrics.gpu_hours} hrs`} signal="Ollama + workloads" />
               <Stat icon={FileText} label="Invoice value" value={formatInr(data.metrics.invoice_total_inr)} signal={`${data.metrics.active_customers} active customers`} />
+            </section>
+
+            <section className="panel intelligence-panel">
+              <div className="panel-head"><div><span>Intelligence & Alarms</span><h2>Forecast, anomaly and chargeback signals</h2></div><Sparkles size={22} /></div>
+              <div className="intelligence-grid">
+                {intelligenceMetrics.map((metric) => {
+                  const MetricIcon = metric.icon;
+                  return (
+                    <article className={`intel-card ${metric.tone}`} key={metric.label}>
+                      <MetricIcon size={18} />
+                      <span>{metric.label}</span>
+                      <strong>{metric.value}</strong>
+                      <small>{metric.detail}</small>
+                    </article>
+                  );
+                })}
+              </div>
+              <div className="alarm-strip">
+                <button onClick={() => setActiveView("Alerts")}><Bell size={16} /> Review alarms</button>
+                <button onClick={() => setActiveView("Kubernetes")}><Boxes size={16} /> Inspect namespaces</button>
+                <button onClick={() => setActiveView("Invoices")}><Receipt size={16} /> Check invoice coverage</button>
+              </div>
             </section>
 
             <section className="command-grid">
