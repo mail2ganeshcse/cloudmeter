@@ -169,7 +169,7 @@ class WorkspaceInvitation(Base):
     status: Mapped[str] = mapped_column(String(24), default="pending")
     invited_user_id: Mapped[int] = mapped_column(Integer, default=0, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class UserAccount(Base):
