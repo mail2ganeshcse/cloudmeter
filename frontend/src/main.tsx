@@ -1010,6 +1010,43 @@ function App() {
     { label: "Connect cluster", detail: "Generate a read-only agent script", icon: Boxes, view: "Kubernetes" },
     { label: "Review AI meter", detail: "Inspect token and GPU usage", icon: Brain, view: "AI Metering" },
   ];
+  const serverlessModels = [
+    {
+      name: "kimi-k2.5",
+      modalities: ["text + chat", "image"],
+      input: "$0.60",
+      output: "$3.00",
+      profile: "High-performance 70B parameter model with FP8 quantization for efficient inference.",
+    },
+    {
+      name: "kimi-k2.6",
+      modalities: ["text + chat", "image"],
+      input: "$1.20",
+      output: "$4.50",
+      profile: "High-performance 70B parameter model with FP8 quantization for efficient inference.",
+    },
+    {
+      name: "minimax-m2.5",
+      modalities: ["text + chat"],
+      input: "$0.30",
+      output: "$1.20",
+      profile: "High-performance 70B parameter model with FP8 quantization for efficient inference.",
+    },
+    {
+      name: "minimax-m2.7",
+      modalities: ["text + chat"],
+      input: "$0.30",
+      output: "$1.20",
+      profile: "High-performance 70B parameter model with FP8 quantization for efficient inference.",
+    },
+    {
+      name: "nemotron-3-super-fp4",
+      modalities: ["text + chat"],
+      input: "$0.30",
+      output: "$0.75",
+      profile: "High-throughput FP4 model option for low-cost inference and chargeback experiments.",
+    },
+  ];
   const cloudSetupFields: Record<string, Array<{ name: string; label: string; placeholder: string; secret?: boolean }>> = {
     AWS: [
       { name: "display_name", label: "Connector name", placeholder: "AWS production billing" },
@@ -1858,6 +1895,52 @@ function App() {
                     </article>
                   );
                 }) : null}
+              </div>
+            </section>
+
+            <section className="panel serverless-model-panel">
+              <div className="serverless-model-hero">
+                <div>
+                  <span className="eyebrow">Serverless model APIs</span>
+                  <h2>Open model library for cluster workloads</h2>
+                  <p>Browse, compare and meter hosted open-source models with free rate-limited access, token billing and workspace chargeback.</p>
+                </div>
+                <div className="model-access-card">
+                  <strong>Free</strong>
+                  <span>with rate limits</span>
+                  <button onClick={() => setActiveView("AI Metering")}><Brain size={16} /> Usage meter</button>
+                </div>
+              </div>
+              <div className="model-library-grid">
+                {serverlessModels.map((model) => (
+                  <article className="model-card" key={model.name}>
+                    <div className="model-card-head">
+                      <div>
+                        <strong>{model.name}</strong>
+                        <span>Deployed by CloudMeter</span>
+                      </div>
+                      <Sparkles size={18} />
+                    </div>
+                    <div className="model-tags">
+                      {model.modalities.map((modality) => <span key={modality}>{modality}</span>)}
+                    </div>
+                    <p>{model.profile}</p>
+                    <div className="model-price-row">
+                      <div>
+                        <strong>{model.input}</strong>
+                        <span>/1M input tokens</span>
+                      </div>
+                      <div>
+                        <strong>{model.output}</strong>
+                        <span>/1M output tokens</span>
+                      </div>
+                    </div>
+                    <div className="model-actions">
+                      <button onClick={() => copyCommand(`https://cloudmeter.in/api/models/${model.name}/v1/chat/completions`, model.name)}><Copy size={15} /> {copied === model.name ? "Copied" : "Copy endpoint"}</button>
+                      <button onClick={() => setActiveView("AI Metering")}><Terminal size={15} /> Meter usage</button>
+                    </div>
+                  </article>
+                ))}
               </div>
             </section>
 
