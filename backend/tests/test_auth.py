@@ -631,6 +631,38 @@ def test_cluster_data_is_isolated_between_google_users(client, db_session, monke
     assert all(row["cluster"] != "private-cluster" for row in other_dashboard.json()["kubernetes"])
 
 
+def test_dashboard_chargeback_excludes_seeded_cloud_and_ai_owners(client, db_session, monkeypatch):
+    login_as(client, monkeypatch, "owner@gmail.com", "owner-sub")
+    created = client.post(
+        "/api/onboarding/clusters",
+        json={"cluster_name": "chargeback-cluster", "provider": "Any cloud / On-prem", "environment": "Kubernetes"},
+    )
+    cluster = db_session.query(ClusterConnection).filter(ClusterConnection.id == created.json()["id"]).first()
+    db_session.add(
+        KubernetesCost(
+            customer_id=cluster.customer_id,
+            owner_user_id=cluster.owner_user_id,
+            cluster="chargeback-cluster",
+            namespace="apps",
+            workload="pod/app",
+            team="Live Team",
+            cpu_core_hours=1,
+            memory_gb_hours=1,
+            gpu_hours=0,
+            amount_inr=123,
+            month="2026-06",
+        )
+    )
+    db_session.commit()
+
+    dashboard = client.get("/api/dashboard")
+    assert dashboard.status_code == 200
+    teams = {row["team"] for row in dashboard.json()["teamChargeback"]}
+    assert "Live Team" in teams
+    assert "Managed Client A" not in teams
+    assert "OpenAI agent" not in teams
+
+
 def test_workspace_invite_shares_cluster_dashboard_with_access_modes(client, db_session, monkeypatch):
     login_as(client, monkeypatch, "owner@gmail.com", "owner-sub")
     created = client.post(

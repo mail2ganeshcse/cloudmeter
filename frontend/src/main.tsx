@@ -1952,14 +1952,14 @@ function App() {
                 </div>
               </article>
               <article className="panel">
-                <div className="panel-head"><div><span>All Chargeback</span><h2>Cloud, Kubernetes and AI owners</h2></div><Banknote size={22} /></div>
+                <div className="panel-head"><div><span>Workspace Chargeback</span><h2>Live Kubernetes owners</h2></div><Banknote size={22} /></div>
                 <div className="chargeback">
-                  {data.teamChargeback.slice(0, 10).map((item) => (
+                  {data.teamChargeback.length ? data.teamChargeback.slice(0, 10).map((item) => (
                     <div key={item.team}>
                       <label>{item.team}<strong>{formatInr(item.amount)}</strong></label>
                       <Bar value={item.amount} max={maxTeam} />
                     </div>
-                  ))}
+                  )) : <p className="empty-state">No live owner chargeback yet. Connect a cluster and wait for the agent snapshot.</p>}
                 </div>
               </article>
             </section>
@@ -2254,12 +2254,12 @@ function App() {
             <article className="panel">
               <div className="panel-head"><div><span>Chargeback</span><h2>Billable owners</h2></div><Banknote size={22} /></div>
               <div className="chargeback">
-                {data.teamChargeback.slice(0, 8).map((item) => (
+                {data.teamChargeback.length ? data.teamChargeback.slice(0, 8).map((item) => (
                   <div key={item.team}>
                     <label>{item.team}<strong>{formatInr(item.amount)}</strong></label>
                     <Bar value={item.amount} max={maxTeam} />
                   </div>
-                ))}
+                )) : <p className="empty-state">No live billable owners yet.</p>}
               </div>
             </article>
           </section>

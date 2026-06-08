@@ -1839,13 +1839,9 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]
 
     chargeback = defaultdict(float)
     kubernetes_team_cost = defaultdict(float)
-    for row in db.query(CloudSpend.team, CloudSpend.amount_inr).all():
-        chargeback[row.team] += row.amount_inr
     for row in namespaces:
         chargeback[row.team] += row.amount_inr
         kubernetes_team_cost[row.team] += row.amount_inr
-    for row in db.query(AiUsage.product, AiUsage.amount_inr).all():
-        chargeback[row.product] += row.amount_inr
 
     return {
         "metrics": {
