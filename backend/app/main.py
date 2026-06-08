@@ -1789,7 +1789,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]
     user, _ = current_user_from_cookie(request, db)
     accessible_owner_ids = workspace_owner_ids_for_user(user, db)
     customers = db.query(Customer).order_by(Customer.name).all()
-    cloud_total = money(db.query(func.sum(CloudSpend.amount_inr)).scalar())
+    cloud_total = 0
     ai_total = money(db.query(func.sum(AiUsage.amount_inr)).scalar())
     invoice_total = money(db.query(func.sum(Invoice.total_inr)).scalar())
     tokens = money(db.query(func.sum(AiUsage.tokens)).scalar())
@@ -1813,7 +1813,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]
     kube_total = money(sum(row.amount_inr for row in namespaces))
     forecast_total = round((cloud_total + kube_total + ai_total) * 1.16)
 
-    provider_rows = db.query(CloudSpend.provider, func.sum(CloudSpend.amount_inr)).group_by(CloudSpend.provider).all()
+    provider_rows: list[tuple[str, int]] = []
     ai_rows = db.query(AiUsage.provider, func.sum(AiUsage.amount_inr), func.sum(AiUsage.tokens), func.sum(AiUsage.requests)).group_by(AiUsage.provider).all()
     ai_usage = db.query(AiUsage).order_by(AiUsage.amount_inr.desc()).all()
     network_usage = (

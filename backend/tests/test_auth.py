@@ -663,6 +663,16 @@ def test_dashboard_chargeback_excludes_seeded_cloud_and_ai_owners(client, db_ses
     assert "OpenAI agent" not in teams
 
 
+def test_dashboard_cloud_provider_ledger_excludes_seeded_cloud_spend(client, monkeypatch):
+    login_as(client, monkeypatch, "owner@gmail.com", "owner-sub")
+
+    dashboard = client.get("/api/dashboard")
+    assert dashboard.status_code == 200
+    body = dashboard.json()
+    assert body["metrics"]["cloud_spend_inr"] == 0
+    assert body["cloudProviders"] == []
+
+
 def test_workspace_invite_shares_cluster_dashboard_with_access_modes(client, db_session, monkeypatch):
     login_as(client, monkeypatch, "owner@gmail.com", "owner-sub")
     created = client.post(

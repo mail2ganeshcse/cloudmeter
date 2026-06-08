@@ -171,7 +171,7 @@ function initialWorkspaceView() {
 const fallback: Dashboard = {
   metrics: {
     total_spend_inr: 4245000,
-    cloud_spend_inr: 1563000,
+    cloud_spend_inr: 0,
     kubernetes_spend_inr: 795000,
     ai_spend_inr: 1382000,
     invoice_total_inr: 4416200,
@@ -182,11 +182,7 @@ const fallback: Dashboard = {
     active_customers: 3,
   },
   customers: [],
-  cloudProviders: [
-    { name: "AWS", amount: 583000 },
-    { name: "GCP", amount: 473000 },
-    { name: "OCI", amount: 507000 },
-  ],
+  cloudProviders: [],
   cloudIntegrations: [],
   aiProviders: [
     { name: "OpenAI", amount: 621000, tokens: 209200000, requests: 882000 },
@@ -1812,13 +1808,13 @@ function App() {
               <article className="panel">
                 <div className="panel-head"><div><span>Cloud Cost</span><h2>Provider ledger</h2></div><Cloud size={22} /></div>
                 <div className="list">
-                  {data.cloudProviders.map((item) => (
+                  {data.cloudProviders.length ? data.cloudProviders.map((item) => (
                     <div className="row" key={item.name}>
                       <span className={`badge ${item.name.toLowerCase()}`}>{item.name}</span>
                       <Bar value={item.amount} max={maxProvider} />
                       <strong>{formatInr(item.amount)}</strong>
                     </div>
-                  ))}
+                  )) : <p className="empty-state">No live cloud billing data yet. Connect AWS CUR, GCP BigQuery, OCI usage reports, or Azure Cost Management to populate this ledger.</p>}
                 </div>
               </article>
               <article className="panel">
