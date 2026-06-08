@@ -125,7 +125,7 @@ type ManagedUser = {
   sessions: number;
 };
 
-const workspaceViews = ["Command", "Cloud", "Kubernetes", "AI Metering", "Invoices", "Alerts", "User Management"] as const;
+const workspaceViews = ["Command", "Costing", "Cloud", "Kubernetes", "AI Metering", "Invoices", "Alerts", "User Management"] as const;
 const viewStorageKey = "cloudmeter.activeView";
 
 function viewToHash(view: string) {
@@ -750,7 +750,7 @@ function App() {
   const aiRows = data.aiUsage.slice(0, 6);
   const isSuperadmin = session?.session.role === "superadmin";
   const limited = session?.session.role !== "admin" && !isSuperadmin;
-  const visibleViews = ["Command", "Cloud", "Kubernetes", "AI Metering", "Invoices", "Alerts", ...(isSuperadmin ? ["User Management"] : [])];
+  const visibleViews = ["Command", "Costing", "Cloud", "Kubernetes", "AI Metering", "Invoices", "Alerts", ...(isSuperadmin ? ["User Management"] : [])];
   const connectorCluster = generatedConnectorCluster ?? onboarding?.clusters?.find((cluster) => cluster.clusterName === connectorClusterName) ?? null;
   const liveKubernetesRows = k8sRows.length;
   const networkNamespaces = new Set((data.networkUsage ?? []).map((row) => `${row.cluster}:${row.namespace}`)).size;
@@ -793,7 +793,7 @@ function App() {
     { label: "Connected clusters", value: k8sClusters ? `${k8sClusters}` : "Waiting", detail: verifiedConnectorCluster ? `Latest: ${verifiedConnectorCluster.clusterName}` : "Verify an installed agent" },
     { label: "Live namespaces", value: k8sNamespaces ? `${k8sNamespaces}` : "0", detail: "Chargeback groups" },
     { label: "Pod rows", value: liveKubernetesRows ? `${liveKubernetesRows}` : "0", detail: "CPU and RAM metering" },
-    { label: "K8s cost", value: k8sTotalCost ? formatInr(k8sTotalCost) : "Waiting", detail: "Current captured usage" },
+    { label: "Node inventory", value: data.nodeInventory?.length ? `${data.nodeInventory.length}` : "Pending", detail: "EC2 type and capacity capture" },
     { label: "Network rows", value: k8sNetworkRows ? `${k8sNetworkRows}` : "0", detail: "RX/TX telemetry" },
   ];
   const readyInvoices = data.invoices.filter((invoice) => String(invoice.status) === "ready").length;
@@ -865,9 +865,9 @@ function App() {
     { label: "Invoice", detail: "Customer-ready totals", value: formatInr(data.metrics.invoice_total_inr), icon: Receipt },
   ];
   const commandActions = [
+    { label: "Review costing", detail: "Cloud, K8s, AI and chargeback totals", icon: WalletCards, view: "Costing" },
     { label: "Connect cluster", detail: "Generate a read-only agent script", icon: Boxes, view: "Kubernetes" },
     { label: "Review AI meter", detail: "Inspect token and GPU usage", icon: Brain, view: "AI Metering" },
-    { label: "Prepare invoices", detail: "Check customer-ready bills", icon: Receipt, view: "Invoices" },
   ];
   const pageCopy: Record<string, { title: string; body: string; icon: any }> = {
     Command: {
@@ -875,14 +875,19 @@ function App() {
       body: "One place to watch cloud, Kubernetes, AI usage, forecasts and customer billing health.",
       icon: Gauge,
     },
+    Costing: {
+      title: "Costing control room",
+      body: "Analyze cloud, Kubernetes, AI model, node, network and chargeback cost from one financial workspace.",
+      icon: WalletCards,
+    },
     Cloud: {
       title: "Cloud cost ledger",
-      body: "Connect AWS, GCP, OCI and Azure billing exports, normalize tags and allocate spend to teams or customers.",
+      body: "Connect AWS, GCP, OCI and Azure billing exports, normalize tags and keep billing integrations healthy.",
       icon: Cloud,
     },
     Kubernetes: {
-      title: "Kubernetes costing and chargeback",
-      body: "Onboard clusters, track namespace and pod cost, then produce team-level chargeback without write access.",
+      title: "Kubernetes operations",
+      body: "Onboard clusters, verify read-only agents, inspect node inventory and watch live namespace telemetry.",
       icon: Boxes,
     },
     "AI Metering": {
@@ -1130,7 +1135,7 @@ function App() {
           </div>
         </div>
         {visibleViews.map((item, index) => {
-          const icons = [Gauge, Cloud, Boxes, Brain, Receipt, Bell, Users];
+          const icons = [Gauge, WalletCards, Cloud, Boxes, Brain, Receipt, Bell, Users];
           const Icon = icons[index];
           return (
             <button key={item} className={activeView === item ? "active" : ""} onClick={() => setActiveView(item)}>
@@ -1249,7 +1254,7 @@ function App() {
               <div className="alarm-strip">
                 <button onClick={() => setActiveView("Alerts")}><Bell size={16} /> Review alarms</button>
                 <button onClick={() => setActiveView("Kubernetes")}><Boxes size={16} /> Inspect namespaces</button>
-                <button onClick={() => setActiveView("Invoices")}><Receipt size={16} /> Check invoice coverage</button>
+                <button onClick={() => setActiveView("Costing")}><WalletCards size={16} /> Open costing</button>
               </div>
             </section>
 
@@ -1313,21 +1318,17 @@ function App() {
         {activeView === "Cloud" && (
           <>
             <section className="stats-grid">
-              <Stat icon={Cloud} label="Cloud spend" value={formatInr(data.metrics.cloud_spend_inr)} signal="AWS + GCP + OCI" />
-              <Stat icon={LineChart} label="Forecast" value={formatInr(data.metrics.forecast_total_inr)} signal="All providers" />
+              <Stat icon={Cloud} label="Providers" value={`${data.cloudProviders.length}`} signal="AWS + GCP + OCI" />
+              <Stat icon={LineChart} label="Exports" value="Ready" signal="CUR, BigQuery, usage reports" />
               <Stat icon={Building2} label="Customers" value={`${data.metrics.active_customers}`} signal="Active billing owners" />
               <Stat icon={ShieldCheck} label="Access mode" value="Read-only" signal="Billing export sync" />
             </section>
             <section className="grid two">
               <article className="panel">
-                <div className="panel-head"><div><span>Provider Cost</span><h2>Multi-cloud ledger</h2></div><Cloud size={22} /></div>
-                <div className="list">
-                  {data.cloudProviders.map((item) => (
-                    <div className="row" key={item.name}>
-                      <span className={`badge ${item.name.toLowerCase()}`}>{item.name}</span>
-                      <Bar value={item.amount} max={maxProvider} />
-                      <strong>{formatInr(item.amount)}</strong>
-                    </div>
+                <div className="panel-head"><div><span>Cloud Setup</span><h2>Provider connector status</h2></div><Cloud size={22} /></div>
+                <div className="feature-list">
+                  {["AWS Cost and Usage Report", "GCP BigQuery billing export", "OCI usage reports", "Azure Cost Management"].map((item) => (
+                    <label key={item}><CheckCircle2 size={16} /> {item}</label>
                   ))}
                 </div>
               </article>
@@ -1343,54 +1344,50 @@ function App() {
           </>
         )}
 
-        {activeView === "Kubernetes" && (
+        {activeView === "Costing" && (
           <>
-            <section className="kubernetes-health">
-              {kubernetesSignals.map((signal) => (
-                <article key={signal.label}>
-                  <span>{signal.label}</span>
-                  <strong>{signal.value}</strong>
-                  <small>{signal.detail}</small>
-                </article>
-              ))}
+            <section className="stats-grid">
+              <Stat icon={WalletCards} label="Total cost" value={formatInr(data.metrics.total_spend_inr)} signal="Cloud + K8s + AI" />
+              <Stat icon={Cloud} label="Cloud cost" value={formatInr(data.metrics.cloud_spend_inr)} signal="Provider billing exports" />
+              <Stat icon={Boxes} label="Kubernetes cost" value={formatInr(data.metrics.kubernetes_spend_inr)} signal="Pods, nodes, network" />
+              <Stat icon={Brain} label="AI model cost" value={formatInr(data.metrics.ai_spend_inr)} signal="Tokens, requests, GPU" />
             </section>
 
-            <section className="onboarding-panel k8s-onboarding-panel">
-              <div className="onboarding-copy">
-                <span className="eyebrow">Company onboarding</span>
-                <h2>Connect Kubernetes with one read-only command.</h2>
-                <p>
-                  Invite a customer, generate one cloud-neutral command, then run it from any terminal or cloud shell with kubectl access.
-                </p>
-                <div className="prereqs">
-                  {(onboarding?.prerequisites ?? ["kubectl access", "curl installed", "outbound HTTPS"]).map((item) => (
-                    <label key={item}><CheckCircle2 size={16} /> {item}</label>
+            <section className="grid two">
+              <article className="panel">
+                <div className="panel-head"><div><span>Cloud Cost</span><h2>Provider ledger</h2></div><Cloud size={22} /></div>
+                <div className="list">
+                  {data.cloudProviders.map((item) => (
+                    <div className="row" key={item.name}>
+                      <span className={`badge ${item.name.toLowerCase()}`}>{item.name}</span>
+                      <Bar value={item.amount} max={maxProvider} />
+                      <strong>{formatInr(item.amount)}</strong>
+                    </div>
                   ))}
                 </div>
-                {clusterRefreshMessage && <p className="cluster-refresh-message">{clusterRefreshMessage}</p>}
-              </div>
-              <div className="cluster-stack">
-                <article className="cluster-card">
-                  <div>
-                    <strong>Kubernetes connector</strong>
-                    <span>Any cloud / On-prem · Kubernetes · read-only</span>
-                  </div>
-                  <em className={verifiedConnectorCluster ? "connected" : "pending"}>{verifiedConnectorCluster ? "connected" : "not verified"}</em>
-                  <label>Cluster name</label>
-                  <input value={connectorClusterName} onChange={(event) => setConnectorClusterName(event.target.value)} placeholder="stage-cluster" />
-                  <p>{verifiedConnectorCluster ? `Verified cluster: ${verifiedConnectorCluster.clusterName}` : "Generate a tokenized script, run it from a terminal with kubectl access, then verify status here."}</p>
-                  <div className="cluster-actions">
-                    <button onClick={generateConnectorScript} disabled={connectorSaving}><Terminal size={16} /> {connectorSaving ? "Generating..." : "Generate script"}</button>
-                    {connectorCluster && (
-                      <>
-                        <button onClick={() => copyCommand(connectorCluster.installCommand, connectorCluster.clusterName)}><Copy size={16} /> {copied === connectorCluster.clusterName ? "Copied" : "Copy install"}</button>
-                        <button onClick={verifyConnectorStatus} disabled={connectorVerifying}><CheckCircle2 size={16} /> {connectorVerifying ? "Verifying..." : "Verify status"}</button>
-                      </>
-                    )}
-                  </div>
-                </article>
-              </div>
+              </article>
+              <article className="panel">
+                <div className="panel-head"><div><span>AI Model Costing</span><h2>Provider and model spend</h2></div><Brain size={22} /></div>
+                <div className="table-shell">
+                  <table className="k8s-table">
+                    <thead><tr><th>Product</th><th>Provider</th><th>Model</th><th>Requests</th><th>Tokens</th><th>Bill</th></tr></thead>
+                    <tbody>
+                      {data.aiUsage.slice(0, 8).map((row) => (
+                        <tr key={`${row.provider}-${row.model}-${row.product}`}>
+                          <td><span className="cell-title">{row.product}</span></td>
+                          <td>{row.provider}</td>
+                          <td><span className="cell-detail">{row.model}</span></td>
+                          <td>{compact(Number(row.requests))}</td>
+                          <td>{compact(Number(row.tokens))}</td>
+                          <td className="money-cell">{formatInr(Number(row.amount))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </article>
             </section>
+
             <section className="kubernetes-layout">
               <article className="panel wide k8s-cost-panel">
                 <div className="panel-head"><div><span>Kubernetes Costing</span><h2>Namespace and pod-level chargeback</h2></div><ServerCog size={22} /></div>
@@ -1469,32 +1466,97 @@ function App() {
                 </div>
               </article>
             </section>
-            <section className="panel k8s-node-panel">
-              <div className="panel-head"><div><span>Node Cost</span><h2>AWS EC2 node type and allocatable capacity</h2></div><Cpu size={22} /></div>
-              <div className="table-shell k8s-table-shell">
-                <table className="k8s-table node-table">
-                  <thead><tr><th>Cluster</th><th>Node</th><th>Instance</th><th>Zone</th><th>CPU</th><th>Memory</th><th>Hourly</th><th>Monthly</th></tr></thead>
-                  <tbody>
-                    {(data.nodeInventory ?? []).length ? (data.nodeInventory ?? []).map((node) => {
-                      const cpu = formatCpu(Number(node.cpuAllocatable));
-                      const memory = formatMemory(Number(node.memoryGib));
-                      return (
-                        <tr key={`${node.cluster}-${node.nodeName}`}>
-                          <td><span className="cell-title">{node.cluster}</span></td>
-                          <td><span className="cell-detail">{node.nodeName}</span></td>
-                          <td><span className="source-pill live">{node.instanceType}</span></td>
-                          <td>{node.zone}</td>
-                          <td className="metric-cell">{cpu.value}<small>{cpu.unit}</small></td>
-                          <td className="metric-cell">{memory.value}<small>{memory.unit}</small></td>
-                          <td className="money-cell">{formatInr(Number(node.hourlyInr))}/h</td>
-                          <td className="money-cell">{formatInr(Number(node.monthlyInr))}</td>
-                        </tr>
-                      );
-                    }) : (
-                      <tr><td colSpan={8}><span className="empty-state">Node inventory will appear after reinstalling or updating the CloudMeter agent. It reads Kubernetes node labels such as node.kubernetes.io/instance-type.</span></td></tr>
+
+            <section className="grid two">
+              <article className="panel k8s-node-panel">
+                <div className="panel-head"><div><span>Node Cost</span><h2>AWS EC2 node type and allocatable capacity</h2></div><Cpu size={22} /></div>
+                <div className="table-shell k8s-table-shell">
+                  <table className="k8s-table node-table">
+                    <thead><tr><th>Cluster</th><th>Node</th><th>Instance</th><th>Zone</th><th>CPU</th><th>Memory</th><th>Hourly</th><th>Monthly</th></tr></thead>
+                    <tbody>
+                      {(data.nodeInventory ?? []).length ? (data.nodeInventory ?? []).map((node) => {
+                        const cpu = formatCpu(Number(node.cpuAllocatable));
+                        const memory = formatMemory(Number(node.memoryGib));
+                        return (
+                          <tr key={`${node.cluster}-${node.nodeName}`}>
+                            <td><span className="cell-title">{node.cluster}</span></td>
+                            <td><span className="cell-detail">{node.nodeName}</span></td>
+                            <td><span className="source-pill live">{node.instanceType}</span></td>
+                            <td>{node.zone}</td>
+                            <td className="metric-cell">{cpu.value}<small>{cpu.unit}</small></td>
+                            <td className="metric-cell">{memory.value}<small>{memory.unit}</small></td>
+                            <td className="money-cell">{formatInr(Number(node.hourlyInr))}/h</td>
+                            <td className="money-cell">{formatInr(Number(node.monthlyInr))}</td>
+                          </tr>
+                        );
+                      }) : (
+                        <tr><td colSpan={8}><span className="empty-state">Node inventory will appear after reinstalling or updating the CloudMeter agent.</span></td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </article>
+              <article className="panel">
+                <div className="panel-head"><div><span>All Chargeback</span><h2>Cloud, Kubernetes and AI owners</h2></div><Banknote size={22} /></div>
+                <div className="chargeback">
+                  {data.teamChargeback.slice(0, 10).map((item) => (
+                    <div key={item.team}>
+                      <label>{item.team}<strong>{formatInr(item.amount)}</strong></label>
+                      <Bar value={item.amount} max={maxTeam} />
+                    </div>
+                  ))}
+                </div>
+              </article>
+            </section>
+          </>
+        )}
+
+        {activeView === "Kubernetes" && (
+          <>
+            <section className="kubernetes-health">
+              {kubernetesSignals.map((signal) => (
+                <article key={signal.label}>
+                  <span>{signal.label}</span>
+                  <strong>{signal.value}</strong>
+                  <small>{signal.detail}</small>
+                </article>
+              ))}
+            </section>
+
+            <section className="onboarding-panel k8s-onboarding-panel">
+              <div className="onboarding-copy">
+                <span className="eyebrow">Company onboarding</span>
+                <h2>Connect Kubernetes with one read-only command.</h2>
+                <p>
+                  Invite a customer, generate one cloud-neutral command, then run it from any terminal or cloud shell with kubectl access.
+                </p>
+                <div className="prereqs">
+                  {(onboarding?.prerequisites ?? ["kubectl access", "curl installed", "outbound HTTPS"]).map((item) => (
+                    <label key={item}><CheckCircle2 size={16} /> {item}</label>
+                  ))}
+                </div>
+                {clusterRefreshMessage && <p className="cluster-refresh-message">{clusterRefreshMessage}</p>}
+              </div>
+              <div className="cluster-stack">
+                <article className="cluster-card">
+                  <div>
+                    <strong>Kubernetes connector</strong>
+                    <span>Any cloud / On-prem · Kubernetes · read-only</span>
+                  </div>
+                  <em className={verifiedConnectorCluster ? "connected" : "pending"}>{verifiedConnectorCluster ? "connected" : "not verified"}</em>
+                  <label>Cluster name</label>
+                  <input value={connectorClusterName} onChange={(event) => setConnectorClusterName(event.target.value)} placeholder="stage-cluster" />
+                  <p>{verifiedConnectorCluster ? `Verified cluster: ${verifiedConnectorCluster.clusterName}` : "Generate a tokenized script, run it from a terminal with kubectl access, then verify status here."}</p>
+                  <div className="cluster-actions">
+                    <button onClick={generateConnectorScript} disabled={connectorSaving}><Terminal size={16} /> {connectorSaving ? "Generating..." : "Generate script"}</button>
+                    {connectorCluster && (
+                      <>
+                        <button onClick={() => copyCommand(connectorCluster.installCommand, connectorCluster.clusterName)}><Copy size={16} /> {copied === connectorCluster.clusterName ? "Copied" : "Copy install"}</button>
+                        <button onClick={verifyConnectorStatus} disabled={connectorVerifying}><CheckCircle2 size={16} /> {connectorVerifying ? "Verifying..." : "Verify status"}</button>
+                      </>
                     )}
-                  </tbody>
-                </table>
+                  </div>
+                </article>
               </div>
             </section>
             <section className="panel user-management k8s-network-panel">
@@ -1526,7 +1588,7 @@ function App() {
         {activeView === "AI Metering" && (
           <>
             <section className="stats-grid">
-              <Stat icon={Brain} label="AI spend" value={formatInr(data.metrics.ai_spend_inr)} signal="All model providers" />
+              <Stat icon={Brain} label="Providers" value={`${data.aiProviders.length}`} signal="OpenAI, Claude, Gemini, Mistral, Ollama" />
               <Stat icon={Zap} label="Requests" value={compact(data.metrics.requests)} signal="Metered API calls" />
               <Stat icon={Layers3} label="Tokens" value={compact(data.metrics.tokens)} signal="Input + output" />
               <Stat icon={Cpu} label="GPU" value={`${data.metrics.gpu_hours} hrs`} signal="Private AI workloads" />
@@ -1535,24 +1597,24 @@ function App() {
               <article className="panel wide">
                 <div className="panel-head"><div><span>AI Metering</span><h2>Tokens, requests, documents, storage and GPU</h2></div><Layers3 size={22} /></div>
                 <table>
-                  <thead><tr><th>Product</th><th>Provider</th><th>Model</th><th>Requests</th><th>Docs</th><th>Bill</th></tr></thead>
+                  <thead><tr><th>Product</th><th>Provider</th><th>Model</th><th>Requests</th><th>Docs</th><th>Storage</th></tr></thead>
                   <tbody>
                     {aiRows.map((row) => (
                       <tr key={`${row.provider}-${row.model}-${row.product}`}>
-                        <td>{row.product}</td><td>{row.provider}</td><td>{row.model}</td><td>{compact(Number(row.requests))}</td><td>{compact(Number(row.documents))}</td><td>{formatInr(Number(row.amount))}</td>
+                        <td>{row.product}</td><td>{row.provider}</td><td>{row.model}</td><td>{compact(Number(row.requests))}</td><td>{compact(Number(row.documents))}</td><td>{compact(Number(row.storageGb))} GB</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </article>
               <article className="panel">
-                <div className="panel-head"><div><span>AI Usage Billing</span><h2>Models and dimensions</h2></div><Zap size={22} /></div>
+                <div className="panel-head"><div><span>AI Metering</span><h2>Models and dimensions</h2></div><Zap size={22} /></div>
                 <div className="list">
                   {data.aiProviders.map((item) => (
                     <div className="row ai" key={item.name}>
                       <span className="badge ai-badge">{item.name}</span>
-                      <Bar value={item.amount} max={maxAi} />
-                      <strong>{formatInr(item.amount)}</strong>
+                      <Bar value={item.tokens} max={Math.max(...data.aiProviders.map((provider) => provider.tokens), 1)} />
+                      <strong>{compact(item.requests)}</strong>
                       <small>{compact(item.tokens)} tokens</small>
                     </div>
                   ))}
