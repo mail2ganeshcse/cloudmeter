@@ -124,6 +124,30 @@ type ManagedUser = {
   sessions: number;
 };
 
+const workspaceViews = ["Command", "Cloud", "Kubernetes", "AI Metering", "Invoices", "Alerts", "User Management"] as const;
+const viewStorageKey = "cloudmeter.activeView";
+
+function viewToHash(view: string) {
+  return view.toLowerCase().replace(/\s+/g, "-");
+}
+
+function hashToView(hash: string) {
+  const cleanHash = hash.replace(/^#/, "").toLowerCase();
+  return workspaceViews.find((view) => viewToHash(view) === cleanHash) ?? null;
+}
+
+function initialWorkspaceView() {
+  if (typeof window === "undefined") {
+    return "Command";
+  }
+  const hashView = hashToView(window.location.hash);
+  if (hashView) {
+    return hashView;
+  }
+  const storedView = window.localStorage.getItem(viewStorageKey);
+  return workspaceViews.includes(storedView as typeof workspaceViews[number]) ? storedView ?? "Command" : "Command";
+}
+
 const fallback: Dashboard = {
   metrics: {
     total_spend_inr: 4245000,
@@ -627,7 +651,7 @@ function App() {
   const [data, setData] = useState<Dashboard>(fallback);
   const [session, setSession] = useState<Session | null>(null);
   const [onboarding, setOnboarding] = useState<Onboarding | null>(null);
-  const [activeView, setActiveView] = useState("Command");
+  const [activeView, setActiveView] = useState(initialWorkspaceView);
   const [copied, setCopied] = useState("");
   const [authLoading, setAuthLoading] = useState(true);
   const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
@@ -691,6 +715,7 @@ function App() {
   const aiRows = data.aiUsage.slice(0, 6);
   const isSuperadmin = session?.session.role === "superadmin";
   const limited = session?.session.role !== "admin" && !isSuperadmin;
+  const visibleViews = ["Command", "Cloud", "Kubernetes", "AI Metering", "Invoices", "Alerts", ...(isSuperadmin ? ["User Management"] : [])];
   const connectorCluster = generatedConnectorCluster ?? onboarding?.clusters?.find((cluster) => cluster.clusterName === connectorClusterName) ?? null;
   const liveKubernetesRows = k8sRows.length;
   const networkNamespaces = new Set((data.networkUsage ?? []).map((row) => `${row.cluster}:${row.namespace}`)).size;
@@ -762,6 +787,29 @@ function App() {
     },
   };
   const ActiveIcon = pageCopy[activeView]?.icon ?? Gauge;
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const hashView = hashToView(window.location.hash);
+      if (hashView) {
+        setActiveView(hashView);
+      }
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  useEffect(() => {
+    if (activeView === "User Management" && session && !isSuperadmin) {
+      setActiveView("Command");
+      return;
+    }
+    window.localStorage.setItem(viewStorageKey, activeView);
+    const nextHash = `#${viewToHash(activeView)}`;
+    if (window.location.hash !== nextHash) {
+      window.history.replaceState(null, "", nextHash);
+    }
+  }, [activeView, isSuperadmin, session]);
 
   function loadManagedUsers() {
     fetch(`${apiUrl}/api/users`, { credentials: "include" })
@@ -961,7 +1009,7 @@ function App() {
             <small>Usage Billing Platform</small>
           </div>
         </div>
-        {["Command", "Cloud", "Kubernetes", "AI Metering", "Invoices", "Alerts", ...(isSuperadmin ? ["User Management"] : [])].map((item, index) => {
+        {visibleViews.map((item, index) => {
           const icons = [Gauge, Cloud, Boxes, Brain, Receipt, Bell, Users];
           const Icon = icons[index];
           return (
