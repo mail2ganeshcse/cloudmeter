@@ -38,7 +38,7 @@ npm run dev
 
 Open `http://localhost:5173`.
 
-The API seeds demo customers, AWS/GCP/OCI spend, Kubernetes namespace costs, AI provider usage, invoices, alerts, forecasts, and recommendations on first startup.
+The API starts with an empty workspace. Dashboard data appears after users connect Kubernetes clusters, cloud billing exports, and AI metering sources.
 
 ## Login and onboarding
 
@@ -48,10 +48,10 @@ The API seeds demo customers, AWS/GCP/OCI spend, Kubernetes namespace costs, AI 
 - Click `Continue with Google` to open Google Identity Services popup authorization.
 - Verified Google users enter a limited viewer workspace.
 - Limited users can view the dashboard and connect one read-only Kubernetes cluster.
-- Admin-style demo access is returned for `cloudmeter.ai` or `example.com` emails.
+- Workspace Admin access is returned for `cloudmeter.ai` or `example.com` emails.
 - The backend stores the Google profile and a hashed CloudMeter session in Postgres, then sets an HttpOnly `cloudmeter_session` cookie.
 - The onboarding panel shows prerequisites, connected clusters, and copyable install/verify commands.
-- The generated install command downloads `http://localhost:8001/api/agent/install.sh` and creates a `cloudmeter-agent` namespace, service account, read-only RBAC, and demo agent deployment.
+- The generated install command downloads `http://localhost:8001/api/agent/install.sh` and creates a `cloudmeter-agent` namespace, service account, read-only RBAC, metrics agent, and network collector.
 
 Example command format:
 

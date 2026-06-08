@@ -25,7 +25,6 @@ from .models import (
     AiUsage,
     BudgetAlert,
     CloudIntegration,
-    CloudSpend,
     ClusterConnection,
     ClusterNodeInventory,
     Customer,
@@ -36,7 +35,6 @@ from .models import (
     UserSession,
     WorkspaceInvitation,
 )
-from .seed import seed_if_empty
 from .settings import settings
 
 app = FastAPI(title="CloudMeter AI API", version="0.1.0")
@@ -55,8 +53,6 @@ def startup() -> None:
     Base.metadata.create_all(bind=engine)
     ensure_user_account_columns()
     ensure_owner_columns()
-    with SessionLocal() as db:
-        seed_if_empty(db)
 
 
 def money(value: float | None) -> int:
@@ -1788,13 +1784,12 @@ echo "Network agent: kubectl get pods -n cloudmeter-agent -l app.kubernetes.io/n
 def dashboard(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
     user, _ = current_user_from_cookie(request, db)
     accessible_owner_ids = workspace_owner_ids_for_user(user, db)
-    customers = db.query(Customer).order_by(Customer.name).all()
     cloud_total = 0
-    ai_total = money(db.query(func.sum(AiUsage.amount_inr)).scalar())
-    invoice_total = money(db.query(func.sum(Invoice.total_inr)).scalar())
-    tokens = money(db.query(func.sum(AiUsage.tokens)).scalar())
-    requests = money(db.query(func.sum(AiUsage.requests)).scalar())
-    gpu_seconds = money(db.query(func.sum(AiUsage.gpu_seconds)).scalar())
+    ai_total = 0
+    invoice_total = 0
+    tokens = 0
+    requests = 0
+    gpu_seconds = 0
     clusters_by_name = {
         (cluster.owner_user_id, cluster.cluster_name): cluster
         for cluster in db.query(ClusterConnection).filter(ClusterConnection.owner_user_id.in_(accessible_owner_ids)).all()
@@ -1814,8 +1809,8 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]
     forecast_total = round((cloud_total + kube_total + ai_total) * 1.16)
 
     provider_rows: list[tuple[str, int]] = []
-    ai_rows = db.query(AiUsage.provider, func.sum(AiUsage.amount_inr), func.sum(AiUsage.tokens), func.sum(AiUsage.requests)).group_by(AiUsage.provider).all()
-    ai_usage = db.query(AiUsage).order_by(AiUsage.amount_inr.desc()).all()
+    ai_rows: list[tuple[str, int, int, int]] = []
+    ai_usage: list[AiUsage] = []
     network_usage = (
         db.query(NetworkUsage)
         .filter(NetworkUsage.owner_user_id.in_(accessible_owner_ids))
@@ -1834,8 +1829,8 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]
         .order_by(CloudIntegration.updated_at.desc())
         .all()
     )
-    invoices = db.query(Invoice).order_by(Invoice.total_inr.desc()).all()
-    alerts = db.query(BudgetAlert).order_by(BudgetAlert.current_inr.desc()).all()
+    invoices: list[Invoice] = []
+    alerts: list[BudgetAlert] = []
 
     chargeback = defaultdict(float)
     kubernetes_team_cost = defaultdict(float)
@@ -1854,12 +1849,9 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]
             "tokens": tokens,
             "requests": requests,
             "gpu_hours": round(gpu_seconds / 3600, 1),
-            "active_customers": len(customers),
+            "active_customers": 0,
         },
-        "customers": [
-            {"id": c.id, "name": c.name, "segment": c.segment, "region": c.region, "billing_model": c.billing_model, "status": c.status}
-            for c in customers
-        ],
+        "customers": [],
         "cloudProviders": [{"name": row[0], "amount": money(row[1])} for row in provider_rows],
         "cloudIntegrations": [cloud_integration_payload(row) for row in cloud_integrations_rows],
         "aiProviders": [{"name": row[0], "amount": money(row[1]), "tokens": money(row[2]), "requests": money(row[3])} for row in ai_rows],
@@ -1874,7 +1866,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]
                 "memory": n.memory_gb_hours,
                 "gpu": n.gpu_hours,
                 "amount": money(n.amount_inr),
-                "source": "live" if is_live_snapshot_row(n) else "demo",
+                "source": "live" if is_live_snapshot_row(n) else "historical",
             }
             for n in namespaces
         ],
@@ -1946,11 +1938,6 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]
             }
             for a in alerts
         ],
-        "recommendations": [
-            "Move steady GPU inference from on-demand cloud GPUs to reserved capacity for MedLM Labs.",
-            "Create namespace budgets for payments, risk-engine, tenant-alpha, and tenant-beta.",
-            "Bill AI products by blended token, request, document, storage, and GPU dimensions.",
-            "Use MSP invoice splits to pass through AWS, OCI, GCP, Kubernetes, and AI line items cleanly.",
-        ],
+        "recommendations": [],
         "teamCost": [{"team": team, "amount": money(amount)} for team, amount in sorted(kubernetes_team_cost.items(), key=lambda x: x[1], reverse=True)],
     }

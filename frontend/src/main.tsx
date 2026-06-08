@@ -170,27 +170,21 @@ function initialWorkspaceView() {
 
 const fallback: Dashboard = {
   metrics: {
-    total_spend_inr: 4245000,
+    total_spend_inr: 0,
     cloud_spend_inr: 0,
-    kubernetes_spend_inr: 795000,
-    ai_spend_inr: 1382000,
-    invoice_total_inr: 4416200,
-    forecast_total_inr: 4924200,
-    tokens: 448300000,
-    requests: 1463000,
-    gpu_hours: 70.6,
-    active_customers: 3,
+    kubernetes_spend_inr: 0,
+    ai_spend_inr: 0,
+    invoice_total_inr: 0,
+    forecast_total_inr: 0,
+    tokens: 0,
+    requests: 0,
+    gpu_hours: 0,
+    active_customers: 0,
   },
   customers: [],
   cloudProviders: [],
   cloudIntegrations: [],
-  aiProviders: [
-    { name: "OpenAI", amount: 621000, tokens: 209200000, requests: 882000 },
-    { name: "Claude", amount: 203000, tokens: 63200000, requests: 187000 },
-    { name: "Gemini", amount: 139000, tokens: 41500000, requests: 91000 },
-    { name: "Mistral", amount: 301000, tokens: 95800000, requests: 231000 },
-    { name: "Ollama", amount: 118000, tokens: 27600000, requests: 72000 },
-  ],
+  aiProviders: [],
   teamChargeback: [],
   kubernetes: [],
   networkUsage: [],
@@ -1644,20 +1638,20 @@ function App() {
             <section className="grid two">
               <article className="panel recommendation">
                 <div className="panel-head"><div><span>AI Recommendations</span><h2>Optimization playbook</h2></div><LineChart size={22} /></div>
-                {data.recommendations.slice(0, 4).map((item) => (
+                {data.recommendations.length ? data.recommendations.slice(0, 4).map((item) => (
                   <p key={item}><Activity size={16} /> {item}</p>
-                ))}
+                )) : <p className="empty-state">No live recommendations yet.</p>}
               </article>
               <article className="panel">
                 <div className="panel-head"><div><span>Budget Alerts</span><h2>Needs attention</h2></div><AlertTriangle size={22} /></div>
                 <div className="alerts">
-                  {data.alerts.slice(0, 3).map((alert) => (
+                  {data.alerts.length ? data.alerts.slice(0, 3).map((alert) => (
                     <div className={`alert ${alert.severity}`} key={`${alert.owner}`}>
                       <strong>{alert.owner}</strong>
                       <span>{alert.message}</span>
                       <label>{formatInr(Number(alert.current))} of {formatInr(Number(alert.threshold))}</label>
                     </div>
-                  ))}
+                  )) : <p className="empty-state">No live budget alerts yet.</p>}
                 </div>
               </article>
             </section>
@@ -1823,7 +1817,7 @@ function App() {
                   <table className="k8s-table">
                     <thead><tr><th>Product</th><th>Provider</th><th>Model</th><th>Requests</th><th>Tokens</th><th>Bill</th></tr></thead>
                     <tbody>
-                      {data.aiUsage.slice(0, 8).map((row) => (
+                      {data.aiUsage.length ? data.aiUsage.slice(0, 8).map((row) => (
                         <tr key={`${row.provider}-${row.model}-${row.product}`}>
                           <td><span className="cell-title">{row.product}</span></td>
                           <td>{row.provider}</td>
@@ -1832,7 +1826,7 @@ function App() {
                           <td>{compact(Number(row.tokens))}</td>
                           <td className="money-cell">{formatInr(Number(row.amount))}</td>
                         </tr>
-                      ))}
+                      )) : <tr><td colSpan={6}><span className="empty-state">No live AI model cost has been metered yet.</span></td></tr>}
                     </tbody>
                   </table>
                 </div>
@@ -2208,25 +2202,25 @@ function App() {
                 <table>
                   <thead><tr><th>Product</th><th>Provider</th><th>Model</th><th>Requests</th><th>Docs</th><th>Storage</th></tr></thead>
                   <tbody>
-                    {aiRows.map((row) => (
+                    {aiRows.length ? aiRows.map((row) => (
                       <tr key={`${row.provider}-${row.model}-${row.product}`}>
                         <td>{row.product}</td><td>{row.provider}</td><td>{row.model}</td><td>{compact(Number(row.requests))}</td><td>{compact(Number(row.documents))}</td><td>{compact(Number(row.storageGb))} GB</td>
                       </tr>
-                    ))}
+                    )) : <tr><td colSpan={6}><span className="empty-state">No live AI usage has been metered yet. Connect model/API metering to populate token, request, document, storage and GPU rows.</span></td></tr>}
                   </tbody>
                 </table>
               </article>
               <article className="panel">
                 <div className="panel-head"><div><span>AI Metering</span><h2>Models and dimensions</h2></div><Zap size={22} /></div>
                 <div className="list">
-                  {data.aiProviders.map((item) => (
+                  {data.aiProviders.length ? data.aiProviders.map((item) => (
                     <div className="row ai" key={item.name}>
                       <span className="badge ai-badge">{item.name}</span>
                       <Bar value={item.tokens} max={Math.max(...data.aiProviders.map((provider) => provider.tokens), 1)} />
                       <strong>{compact(item.requests)}</strong>
                       <small>{compact(item.tokens)} tokens</small>
                     </div>
-                  ))}
+                  )) : <p className="empty-state">No AI provider usage yet.</p>}
                 </div>
               </article>
             </section>
@@ -2238,13 +2232,13 @@ function App() {
             <article className="panel wide">
               <div className="panel-head"><div><span>Invoice Generation</span><h2>Customer-ready bills</h2></div><Receipt size={22} /></div>
               <div className="invoice-list">
-                {data.invoices.map((invoice) => (
+                {data.invoices.length ? data.invoices.map((invoice) => (
                   <div key={invoice.invoiceNo}>
                     <span>{invoice.invoiceNo}</span>
                     <strong>{formatInr(Number(invoice.total))}</strong>
                     <em>{invoice.status}</em>
                   </div>
-                ))}
+                )) : <p className="empty-state">No invoices have been generated from live usage yet.</p>}
               </div>
             </article>
             <article className="panel">
@@ -2266,20 +2260,20 @@ function App() {
             <article className="panel wide">
               <div className="panel-head"><div><span>Budget Alerts</span><h2>Needs attention</h2></div><AlertTriangle size={22} /></div>
               <div className="alerts">
-                {data.alerts.map((alert) => (
+                {data.alerts.length ? data.alerts.map((alert) => (
                   <div className={`alert ${alert.severity}`} key={`${alert.owner}`}>
                     <strong>{alert.owner}</strong>
                     <span>{alert.message}</span>
                     <label>{formatInr(Number(alert.current))} of {formatInr(Number(alert.threshold))}</label>
                   </div>
-                ))}
+                )) : <p className="empty-state">No live budget alerts yet.</p>}
               </div>
             </article>
             <article className="panel recommendation">
               <div className="panel-head"><div><span>AI Recommendations</span><h2>Optimization playbook</h2></div><LineChart size={22} /></div>
-              {data.recommendations.map((item) => (
+              {data.recommendations.length ? data.recommendations.map((item) => (
                 <p key={item}><Activity size={16} /> {item}</p>
-              ))}
+              )) : <p className="empty-state">No live recommendations yet.</p>}
             </article>
           </section>
         )}
